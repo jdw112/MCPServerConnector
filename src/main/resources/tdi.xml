@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetamergeConfig created="Phase 0 scaffold" version="10.0.0">
+	<Folder name="Connectors">
+		<Connector name="jason.MCPServer">
+			<SupportedModes>Server,Iterator</SupportedModes>
+			<Configuration>
+				<parameter name="connectorType">com.jason.di.connector.McpServerConnector</parameter>
+				<parameter name="parserOption">Optional</parameter>
+				<parameter name="endpointPath">/mcp</parameter>
+				<parameter name="bindAddress">127.0.0.1</parameter>
+				<parameter name="tcpPort">8443</parameter>
+				<parameter name="useSSL">false</parameter>
+				<parameter name="needClientAuth">false</parameter>
+				<parameter name="authMode">bearer</parameter>
+				<parameter name="bearerToken"></parameter>
+				<parameter name="toolCatalog">[]</parameter>
+				<parameter name="allowedOrigins"></parameter>
+			</Configuration>
+			<!-- Schema/Forms to be filled in during Phase 1-4; see docs/SPEC.md §3-4. -->
+		</Connector>
+	</Folder>
+</MetamergeConfig>
