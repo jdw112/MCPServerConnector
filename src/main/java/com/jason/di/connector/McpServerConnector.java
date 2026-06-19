@@ -1,9 +1,17 @@
 package com.jason.di.connector;
 
+import com.ibm.di.connector.ConnectorInterface;
 import com.ibm.di.connector.HTTPServerConnector;
 import com.ibm.di.entry.Entry;
+import com.ibm.di.exceptions.RetryEntryException;
 import com.ibm.json.java.JSONArray;
 import com.ibm.json.java.JSONObject;
+
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.NoSuchElementException;
 
 /**
  * MCP (Model Context Protocol) server connector for VDI 10.
@@ -12,10 +20,25 @@ import com.ibm.json.java.JSONObject;
  * framing (see docs/SPEC.md §1); this class adds the JSON-RPC/MCP message
  * layer on top.
  *
- * Phase 0 found that one inbound connection drives exactly one AL cycle on
- * a fresh per-connection instance (HTTPServerConnector#getNextClient), so
- * the instance fields below (pending JSON-RPC id) are safe: they never
- * outlive a single request/response exchange.
+ * HTTPServerConnector#getNextClient() hardcodes `new HTTPServerConnector()`
+ * for the per-connection object it hands back (confirmed by disassembling
+ * HTTPServerConnector.class — it is not `this.getClass().newInstance()` or
+ * a clone). That means a plain subclass's getNextEntry()/replyEntry()
+ * overrides are never invoked for real traffic: the framework always
+ * processes the connection on a base-class instance. getNextClient() is
+ * overridden below to replicate the exact same setup sequence (verified
+ * step-by-step against the decompiled bytecode) but constructing
+ * `new McpServerConnector()` instead, so our overrides actually run.
+ *
+ * Every step that sequence performs uses public inherited methods
+ * (setServerConnector/setConfiguration/setRSInterface/setName/setLog/
+ * initialize(Socket)) except obtaining the listening socket itself
+ * (mServerSocket is private with no accessor), which is why reflection is
+ * used for that one field only.
+ *
+ * One inbound connection still drives exactly one AL cycle on a fresh
+ * per-connection instance, so the instance fields below (pending JSON-RPC
+ * id) are safe: they never outlive a single request/response exchange.
  *
  * Protocol bookkeeping methods (initialize, notifications/initialized,
  * tools/list) are answered directly here without involving the AL, since
@@ -47,6 +70,57 @@ public class McpServerConnector extends HTTPServerConnector {
     @Override
     public String getVersion() {
         return VERSION_INFO;
+    }
+
+    /**
+     * Replicates HTTPServerConnector#getNextClient()'s accept/setup sequence
+     * (verified against the decompiled bytecode), substituting our own
+     * subclass for the per-connection object so getNextEntry()/replyEntry()
+     * overrides below actually run for real traffic. See class doc.
+     */
+    @Override
+    public ConnectorInterface getNextClient() throws Exception {
+        ServerSocket serverSocket = getListeningSocket();
+        if (serverSocket == null) {
+            throw new Exception("McpServerConnector.getNextClient() called on a non-listening (per-connection) instance");
+        }
+
+        if (isTerminating()) {
+            logmsg("McpServerConnector: terminated by external request before accept().");
+            return null;
+        }
+
+        Socket socket = serverSocket.accept();
+
+        if (isTerminating()) {
+            logmsg("McpServerConnector: terminated by external request after accept().");
+            socket.close();
+            return null;
+        }
+
+        McpServerConnector client = new McpServerConnector();
+        client.setServerConnector(this);
+        client.setConfiguration(this.getConfiguration());
+        client.setRSInterface(this.getRSInterface());
+        client.setName(this.getName());
+        client.setLog(this.getLog());
+        try {
+            client.initialize(socket);
+        } catch (IOException | NoSuchElementException e) {
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+                // best-effort close on a socket we're already abandoning
+            }
+            throw new RetryEntryException("McpServerConnector: failed to initialize connection: " + e.getMessage());
+        }
+        return client;
+    }
+
+    private ServerSocket getListeningSocket() throws Exception {
+        Field field = HTTPServerConnector.class.getDeclaredField("mServerSocket");
+        field.setAccessible(true);
+        return (ServerSocket) field.get(this);
     }
 
     @Override

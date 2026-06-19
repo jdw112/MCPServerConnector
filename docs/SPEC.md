@@ -140,6 +140,22 @@ Include a form even though some fields are advanced, so the Config Editor report
 
 ---
 
+## 1b. Phase 1 correction — getNextClient() subclassing trap
+
+Live testing in the Config Editor showed `$mcp.*` attributes never reached the AL's Data Flow, and none of the connector's own log lines fired — meaning `getNextEntry()`/`replyEntry()` overrides were never executing on real traffic, even after redeploying and restarting the server. Disassembling `HTTPServerConnector.class` (`javap -c`) found the cause:
+
+```
+public com.ibm.di.connector.ConnectorInterface getNextClient() throws java.lang.Exception;
+  ...
+  92: new   #19   // class com/ibm/di/connector/HTTPServerConnector
+```
+
+`getNextClient()` hardcodes `new HTTPServerConnector()` for the per-connection object it returns — not `this.getClass().newInstance()`, not a clone. The framework always processes the actual request/response on a base-class instance, so a plain subclass's overrides are silently bypassed. This is the concrete answer to the open question from §1 ("the threading/concurrency model... determines whether v1 must single-thread requests") — it turned out to also determine whether subclassing works at all.
+
+**Fix:** `McpServerConnector` now overrides `getNextClient()` itself, replicating the exact same setup sequence (verified step-by-step against the decompiled bytecode — accept the socket, `setServerConnector`/`setConfiguration`/`setRSInterface`/`setName`/`setLog`, then `initialize(socket)`) but constructing `new McpServerConnector()` instead. Every step in that sequence uses public inherited methods except obtaining the listening `ServerSocket` itself (the `mServerSocket` field is private with no accessor), so reflection (`Field.setAccessible`) is used for that one field only. `ConnectorInterface` (confirmed via its own decompiled method list) declares `getNextEntry`, `replyEntry`, `putEntry`, and `terminateServer` directly — i.e. the AssemblyLine engine interacts with the per-connection object purely through that interface, which is what makes returning our own subclass from `getNextClient()` sufficient; no proxy/delegation layer is needed.
+
+Risk to flag: this reaches into one private field of a vendor class via reflection. If a future VDI patch renames or restructures `HTTPServerConnector`'s internals, this breaks. Acceptable trade-off for keeping all MCP protocol logic in compiled Java inside the connector, as decided, rather than moving it into AL-level Hook scripts.
+
 ## 8. Phased plan
 
 - **Phase 0 — Verify & scaffold.** ✅ Verifications done (§1). Scaffolding (this commit): Maven project, `tdi.xml` skeleton, package skeleton, compiled against VDI jars.
