@@ -11,7 +11,9 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.HashSet;
 import java.util.NoSuchElementException;
+import java.util.Set;
 
 /**
  * MCP (Model Context Protocol) server connector for VDI 10.
@@ -199,19 +201,80 @@ public class McpServerConnector extends HTTPServerConnector {
     }
 
     private Entry buildToolCallEntry(Entry httpEntry, Object id, JSONObject rpc) throws Exception {
-        pendingCallId = id;
-
         Object params = rpc.get("params");
         JSONObject paramsObj = params instanceof JSONObject ? (JSONObject) params : new JSONObject();
         String toolName = (String) paramsObj.get("name");
         Object arguments = paramsObj.get("arguments");
+        JSONObject argumentsObj = arguments instanceof JSONObject ? (JSONObject) arguments : new JSONObject();
+
+        if (toolName == null || !getToolNames().contains(toolName)) {
+            sendToolError(id, "Unknown tool: " + toolName);
+            return null;
+        }
+
+        pendingCallId = id;
 
         Entry work = new Entry();
-        work.setAttribute(ATTR_MCP_TOOL, toolName != null ? toolName : "");
+        work.setAttribute(ATTR_MCP_TOOL, toolName);
         work.setAttribute(ATTR_MCP_REQUEST_ID, id != null ? id.toString() : "");
         work.setAttribute(ATTR_MCP_PROTOCOL_VERSION, PROTOCOL_VERSION);
-        work.setAttribute(ATTR_MCP_ARGUMENTS, arguments != null ? arguments.toString() : "{}");
+        work.setAttribute(ATTR_MCP_ARGUMENTS, argumentsObj.serialize());
+
+        // §3.2: flatten top-level scalar arguments directly onto the Entry too,
+        // so the AL's Data Flow can read e.g. work.text instead of always having
+        // to re-parse $mcp.arguments for simple cases. Nested objects/arrays are
+        // only available via $mcp.arguments.
+        for (Object key : argumentsObj.keySet()) {
+            Object value = argumentsObj.get(key);
+            if (value instanceof String || value instanceof Number || value instanceof Boolean) {
+                work.setAttribute(key.toString(), value.toString());
+            }
+        }
+
         return work;
+    }
+
+    /** Parses the configured toolCatalog (falling back to an empty array on bad JSON). */
+    private JSONArray getToolCatalog() {
+        try {
+            JSONArray tools = JSONArray.parse(getParam("toolCatalog"));
+            return tools != null ? tools : new JSONArray();
+        } catch (Exception e) {
+            return new JSONArray();
+        }
+    }
+
+    private Set<String> getToolNames() {
+        Set<String> names = new HashSet<>();
+        for (Object entry : getToolCatalog()) {
+            if (entry instanceof JSONObject) {
+                Object name = ((JSONObject) entry).get("name");
+                if (name instanceof String) {
+                    names.add((String) name);
+                }
+            }
+        }
+        return names;
+    }
+
+    /** A well-formed tools/call whose tool name isn't in the catalog: a tool-level error, not a JSON-RPC protocol error. */
+    private void sendToolError(Object id, String message) throws Exception {
+        JSONObject textBlock = new JSONObject();
+        textBlock.put("type", "text");
+        textBlock.put("text", message);
+        JSONArray content = new JSONArray();
+        content.add(textBlock);
+
+        JSONObject result = new JSONObject();
+        result.put("content", content);
+        result.put("isError", true);
+
+        JSONObject response = new JSONObject();
+        response.put("jsonrpc", "2.0");
+        response.put("id", id);
+        response.put("result", result);
+
+        sendJson(buildHttpReplyEntry(response, HTTP_OK));
     }
 
     private void sendInitializeResult(Entry httpEntry, Object id) throws Exception {
@@ -234,15 +297,8 @@ public class McpServerConnector extends HTTPServerConnector {
     }
 
     private void sendToolsList(Entry httpEntry, Object id) throws Exception {
-        JSONArray tools;
-        try {
-            tools = JSONArray.parse(getParam("toolCatalog"));
-        } catch (Exception e) {
-            tools = new JSONArray();
-        }
-
         JSONObject result = new JSONObject();
-        result.put("tools", tools);
+        result.put("tools", getToolCatalog());
 
         JSONObject response = new JSONObject();
         response.put("jsonrpc", "2.0");
