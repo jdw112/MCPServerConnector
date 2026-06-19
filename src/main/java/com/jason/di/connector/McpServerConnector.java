@@ -11,6 +11,8 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.HashSet;
 import java.util.NoSuchElementException;
 import java.util.Set;
@@ -125,10 +127,107 @@ public class McpServerConnector extends HTTPServerConnector {
         return (ServerSocket) field.get(this);
     }
 
+    /**
+     * HTTP header names land as http.<HeaderName> attributes preserving the
+     * exact case the client sent (confirmed via the CE's Entry dumps: e.g.
+     * http.Content-Type, http.User-Agent). Headers are case-insensitive per
+     * RFC 7230, so look up by name case-insensitively rather than assuming
+     * any particular casing.
+     */
+    private String getHeader(Entry httpEntry, String headerName) {
+        String target = "http." + headerName;
+        for (String attrName : httpEntry.getAttributeNames()) {
+            if (attrName.equalsIgnoreCase(target)) {
+                return httpEntry.getString(attrName);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * §2/§6: validate Origin when allowedOrigins is configured. Left
+     * permissive (no allowedOrigins configured, or no Origin header sent at
+     * all — e.g. curl/MCP Inspector/non-browser clients) to match the
+     * connector's localhost-by-default v1 posture documented in
+     * docs/CONFIGURE.md.
+     */
+    private boolean isOriginAllowed(Entry httpEntry) {
+        String allowed = getParam("allowedOrigins");
+        if (allowed == null || allowed.trim().isEmpty()) {
+            return true;
+        }
+        String origin = getHeader(httpEntry, "Origin");
+        if (origin == null) {
+            return true;
+        }
+        for (String candidate : allowed.split(",")) {
+            if (candidate.trim().equalsIgnoreCase(origin.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * §6: bearer token check, only enforced when authMode=bearer. authMode=mtls
+     * relies entirely on the TLS layer (useSSL + needClientAuth, both inherited
+     * unmodified from HTTPServerConnector — the per-connection Socket returned
+     * by getNextClient()'s accept() is already an SSLSocket if the listener was
+     * configured for SSL, so client-cert verification happens before our code
+     * ever runs). authMode=none performs no check here.
+     */
+    private boolean isBearerAuthorized(Entry httpEntry) {
+        String mode = getParam("authMode");
+        if (mode == null || !"bearer".equalsIgnoreCase(mode)) {
+            return true;
+        }
+        String expected = getParam("bearerToken");
+        if (expected == null || expected.isEmpty()) {
+            logmsg("McpServerConnector: authMode=bearer but no bearerToken configured; rejecting all requests.");
+            return false;
+        }
+        String header = getHeader(httpEntry, "Authorization");
+        if (header == null || !header.startsWith("Bearer ")) {
+            return false;
+        }
+        String provided = header.substring("Bearer ".length());
+        return MessageDigest.isEqual(
+                provided.getBytes(StandardCharsets.UTF_8),
+                expected.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** §2: absent header is allowed (spec default is 2025-03-26); present-and-mismatched is rejected. */
+    private boolean isProtocolVersionAcceptable(Entry httpEntry) {
+        String header = getHeader(httpEntry, "MCP-Protocol-Version");
+        return header == null || PROTOCOL_VERSION.equals(header);
+    }
+
+    private void sendTransportError(Entry httpEntry, String httpStatus, String message) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("error", message);
+        sendJson(buildHttpReplyEntry(body, httpStatus));
+    }
+
     @Override
     public Entry getNextEntry() throws Exception {
         Entry httpEntry = super.getNextEntry();
         if (httpEntry == null) {
+            return null;
+        }
+
+        String httpMethod = httpEntry.getString("http.method");
+        if (httpMethod != null && !"POST".equalsIgnoreCase(httpMethod)) {
+            sendTransportError(httpEntry, "405 Method Not Allowed", "Only POST is supported on this endpoint.");
+            return null;
+        }
+
+        if (!isOriginAllowed(httpEntry)) {
+            sendTransportError(httpEntry, "403 Forbidden", "Origin not allowed.");
+            return null;
+        }
+
+        if (!isBearerAuthorized(httpEntry)) {
+            sendTransportError(httpEntry, "401 Unauthorized", "Missing or invalid bearer token.");
             return null;
         }
 
@@ -151,6 +250,13 @@ public class McpServerConnector extends HTTPServerConnector {
             return null;
         }
         String method = (String) methodObj;
+
+        // MCP-Protocol-Version is unknown to the client until initialize() responds,
+        // so it's only enforced on requests after that handshake.
+        if (!"initialize".equals(method) && !isProtocolVersionAcceptable(httpEntry)) {
+            sendTransportError(httpEntry, "400 Bad Request", "Unsupported or invalid MCP-Protocol-Version header.");
+            return null;
+        }
 
         switch (method) {
             case "initialize":

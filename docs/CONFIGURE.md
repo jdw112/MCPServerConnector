@@ -24,7 +24,12 @@ cp target/mcp-server-connector.jar /path/to/ISVDI/jars/connectors/
 | Tool Catalog (JSON) | a JSON array of tool definitions, e.g.: `[{"name":"lookup_user","description":"Look up a user by id","inputSchema":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}}]` | Returned verbatim by `tools/list`. Must be valid JSON or it's treated as an empty catalog. |
 | Comment / Detailed Log | optional | |
 
-Security section (Authentication Mode, Bearer Token, Allowed Origins, Use SSL, Require Client Certificate) is present on the form but **none of it is wired into the connector's Java code yet** — see Known limitations. Leave these at defaults for now; they're placeholders for Phase 3.
+Security section (Authentication Mode, Bearer Token, Allowed Origins, Use SSL, Require Client Certificate) is now enforced as of Phase 3:
+
+- **`authMode: bearer`** requires `Authorization: Bearer <bearerToken>` on every request (constant-time compared); missing/wrong token → `401`. If `bearerToken` is left blank while `authMode=bearer`, every request is rejected (fail closed, not open).
+- **`authMode: mtls`** does nothing extra in the connector's own logic — set `useSSL=true` and `needClientAuth=true` instead. Those two are inherited, unmodified `HTTPServerConnector` parameters; client certificate verification happens at the TLS handshake, before any of our code runs.
+- **`authMode: none`** performs no authentication check at all.
+- **Allowed Origins**: only enforced when non-empty. A request with no `Origin` header (curl, MCP Inspector, most non-browser clients) is always allowed through regardless of this setting — it only protects against browser-based DNS-rebinding-style attacks, per the MCP spec's intent.
 
 ## 4. Data Flow
 
@@ -73,6 +78,6 @@ curl -s -X POST http://127.0.0.1:8443/mcp \
 
 Or point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) at `http://127.0.0.1:<tcpPort><endpointPath>`.
 
-## Known limitations (current state, Phase 1)
+## Known limitations (current state, Phase 3)
 
-The connector currently behaves like a plain HTTP listener with no path routing, no bind-address restriction, and no auth enforcement — it accepts any request on the configured port regardless of `endpointPath`, `bindAddress`, `authMode`, `bearerToken`, or `allowedOrigins`. Those fields exist on the form (so the Config Editor doesn't show "form not found" and so the values are ready to read once wired up) but `McpServerConnector.java` doesn't yet read or act on them. That enforcement is scoped for Phase 3 (§6/§8 of [SPEC.md](SPEC.md)). Don't expose this beyond localhost until then.
+`authMode`/`bearerToken`/`allowedOrigins` are now enforced (see above), as is rejecting non-`POST` methods with `405` and validating `MCP-Protocol-Version` on post-`initialize` requests with `400`. Still not enforced: `endpointPath` and `bindAddress` — the connector accepts requests on any path at the configured port regardless of those two fields' values. They remain form-only placeholders. Don't expose this beyond localhost without `useSSL`+`needClientAuth` (mTLS) or `authMode=bearer` configured.
