@@ -36,7 +36,9 @@ Add whatever AL logic should run per `tools/call`. The connector hands the AL a 
 - `$mcp.arguments` — the raw JSON string of `params.arguments`
 - Any top-level **scalar** argument is also flattened directly onto the Entry under its own name (e.g. `arguments: {"text": "hello"}` also sets a plain `text` attribute) — convenient for simple tools that don't want to re-parse JSON. Nested objects/arrays are only available via `$mcp.arguments`.
 
-As of Phase 2, `tools/call` validates the tool name against `toolCatalog` **before** invoking the AL: if the name isn't present in the catalog (or is missing), the connector responds directly with a tool-level error (`isError: true`, no AL cycle spent) rather than handing it to the Data Flow. Make sure `toolCatalog` actually lists every tool name your AL branches on.
+As of Phase 2, `tools/call` validates the tool name against `toolCatalog` **before** invoking the AL: if the name isn't present in the catalog (or is missing), the connector responds directly with a tool-level error (`isError: true`, no AL cycle spent) rather than handing it to the Data Flow.
+
+**This makes the Tool Catalog field load-bearing, not just descriptive.** The `tdi.xml` default is `[]` (empty array) — if you never explicitly paste your tool definitions into the Connection tab's **Tool Catalog (JSON)** field, *every* `tools/call` will fail with "Unknown tool", even for a tool your Data Flow correctly implements. Before debugging Data Flow logic, check this field actually has content.
 
 Have the AL branch on `$mcp.tool`, do its work, and set on the entry it hands to the next stage (the one that ends up calling the connector's `replyEntry`):
 
