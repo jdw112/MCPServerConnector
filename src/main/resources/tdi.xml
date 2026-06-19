@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MetamergeConfig created="Phase 1" version="10.0.0">
 	<Folder name="Connectors">
-		<Connector name="jason.MCPServer">
+		<Connector name="MCPServer">
 			<SupportedModes>Server,Iterator</SupportedModes>
 			<Configuration>
 				<parameter name="connectorType">com.jason.di.connector.McpServerConnector</parameter>
@@ -129,7 +129,7 @@
 				</Values>
 				<parameter name="description">AUTH_MODE_DESC</parameter>
 				<parameter name="label">AUTH_MODE_LABEL</parameter>
-				<parameter name="syntax">dropdown</parameter>
+				<parameter name="syntax">droplist</parameter>
 			</FormItem>
 			<FormItem name="bearerToken">
 				<parameter name="description">BEARER_TOKEN_DESC</parameter>
