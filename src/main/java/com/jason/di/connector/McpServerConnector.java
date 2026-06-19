@@ -130,7 +130,10 @@ public class McpServerConnector extends HTTPServerConnector {
             return null;
         }
 
-        String body = httpEntry.getString(ATTR_NAME_HTTP_BODY);
+        // http.body is the raw byte[]; HTTPServerConnector also exposes a decoded
+        // String copy under http.bodyAsString (confirmed via the CE's Entry dump),
+        // which is what we actually want for JSON parsing.
+        String body = httpEntry.getString("http.bodyAsString");
         JSONObject rpc;
         try {
             rpc = JSONObject.parse(body == null ? "" : body);
