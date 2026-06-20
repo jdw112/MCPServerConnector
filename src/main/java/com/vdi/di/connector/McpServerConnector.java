@@ -1,4 +1,4 @@
-package com.jason.di.connector;
+package com.vdi.di.connector;
 
 import com.ibm.di.connector.ConnectorInterface;
 import com.ibm.di.connector.HTTPServerConnector;

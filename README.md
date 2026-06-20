@@ -27,7 +27,7 @@ Defaults to `/Users/jason/Applications/ISVDI` if `-Dvdi.home` is omitted.
 
 ## Deploy
 
-Copy `target/mcp-server-connector.jar` to `VDI_install_dir/jars/connectors/`, restart the Config Editor / server, and the `MCPServer` connector appears under Connectors. See [docs/CONFIGURE.md](docs/CONFIGURE.md) to build the AssemblyLine and connect a client.
+Copy `target/mcp-server-connector.jar` to `VDI_install_dir/jars/connectors/`, restart the Config Editor / server, and the `MCPServerConnector` connector appears under Connectors. See [docs/CONFIGURE.md](docs/CONFIGURE.md) to build the AssemblyLine and connect a client.
 
 ## Quick connect (Claude Code)
 

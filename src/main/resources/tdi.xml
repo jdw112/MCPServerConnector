@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MetamergeConfig created="Phase 1" version="10.0.0">
 	<Folder name="Connectors">
-		<Connector name="MCPServer">
+		<Connector name="MCPServerConnector">
 			<SupportedModes>Server,Iterator</SupportedModes>
 			<Configuration>
-				<parameter name="connectorType">com.jason.di.connector.McpServerConnector</parameter>
+				<parameter name="connectorType">com.vdi.di.connector.McpServerConnector</parameter>
 				<parameter name="parserOption">Optional</parameter>
 				<!-- serverReply=true makes the AssemblyLine call replyEntry() at end of
 				     cycle for the tools/call path (which returns a work Entry). Without
@@ -63,7 +63,7 @@
 		</Connector>
 	</Folder>
 	<Folder name="Forms">
-		<Form name="com.jason.di.connector.McpServerConnector">
+		<Form name="com.vdi.di.connector.McpServerConnector">
 			<TranslationFile>NLS/idi_conn_mcpserver</TranslationFile>
 			<FormSectionNames>
 				<ListItem>General</ListItem>

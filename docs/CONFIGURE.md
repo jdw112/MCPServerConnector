@@ -11,7 +11,7 @@ cp target/mcp-server-connector.jar /path/to/ISVDI/jars/connectors/
 ## 2. Create the AssemblyLine
 
 1. In the Config Editor, create a new AssemblyLine.
-2. Under **Feed**, add a connector and pick **MCPServer** from the connector list.
+2. Under **Feed**, add a connector and pick **MCPServerConnector** from the connector list.
 3. Set **Mode** to `Server`.
 
 ## 3. Connection tab settings
