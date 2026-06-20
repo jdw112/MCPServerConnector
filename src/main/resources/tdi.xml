@@ -187,19 +187,27 @@ function generateBearerToken() {
 	var token = "" + sb.toString();
 	form.setConfig("bearerToken", token);
 	form.updateControl("bearerToken");
-	// Best-effort: copy to the system clipboard (StringSelection is its own
-	// ClipboardOwner). AWT clipboard access from the CE script engine isn't
-	// reliable on every platform, so this is a bonus, not the primary path.
+	// The CE is an Eclipse/SWT app, so use the SWT clipboard — AWT's Toolkit
+	// clipboard doesn't reliably reach the OS pasteboard from SWT, and AWT modal
+	// dialogs freeze the CE on macOS. This is non-modal: worst case it falls into
+	// the catch (copied=false), it cannot hang the CE.
+	var copied = false;
 	try {
-		var selection = new Packages.java.awt.datatransfer.StringSelection(token);
-		Packages.java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, selection);
+		var Display = Packages.org.eclipse.swt.widgets.Display;
+		var display = Display.getCurrent();
+		if (display == null) {
+			display = Display.getDefault();
+		}
+		var clip = new Packages.org.eclipse.swt.dnd.Clipboard(display);
+		clip.setContents([token], [Packages.org.eclipse.swt.dnd.TextTransfer.getInstance()]);
+		clip.dispose();
+		copied = true;
 	} catch (e) {
-		// ignore — the selectable dialog below always lets the user copy manually
+		copied = false;
 	}
-	// Show the token in an editable input field (NOT a plain info dialog, whose
-	// text can't be selected) so it can always be selected and copied regardless
-	// of clipboard availability. The 2-arg overload prefills the editable field.
-	Packages.javax.swing.JOptionPane.showInputDialog(form.translate("GEN_TOKEN_MSG"), token);
+	// form.alert is the CE's own properly-parented dialog (safe, no hang).
+	var note = copied ? form.translate("GEN_TOKEN_COPIED") : form.translate("GEN_TOKEN_NOCOPY");
+	form.alert(form.translate("GEN_TOKEN_MSG") + "\n\n" + token + "\n\n" + note);
 }
 ]]></parameter>
 		</Form>
