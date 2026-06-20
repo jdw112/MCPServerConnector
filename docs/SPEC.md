@@ -90,6 +90,7 @@ Build the inbound Entry from the call:
 - Flatten top-level scalar `arguments` to Entry attributes.
 - Put the **raw arguments JSON** in a reserved attribute `$mcp.arguments` so the AL can parse nested structure with JSON4J.
 - Metadata attributes: `$mcp.tool` (tool name, the discriminator), `$mcp.requestId` (JSON-RPC id), `$mcp.protocolVersion`.
+- Verified caller identity (when available): `$mcp.actor` (mTLS client-cert subject DN, or the value of a configured trusted `actorHeader`) and `$mcp.actorCn` (the CN). Used for per-user authorization/audit in write flows (see §6, UC2). Not forgeable via arguments — the scalar-flatten step refuses client-supplied `$mcp.*` keys.
 
 ### 3.3 Response contract — reply Entry → `tools/call` result
 AL sets reserved attributes on the outgoing Entry; the connector maps them to the MCP result:
@@ -108,7 +109,7 @@ Parameters (use the `tdi.xml` form, password syntax for secrets, progressive dis
 
 - **General:** `endpointPath` (default `/mcp`), `bindAddress`, `port`, `toolCatalog` (JSON).
 - **Security:** `authMode` (none | bearer | mtls), `bearerToken` (password), `allowedOrigins` (list), `useSSL` (boolean), `needClientAuth` (boolean, mTLS). **Correction vs. original plan:** there are deliberately *no* per-connector keystore/truststore path/password fields. The inherited `HTTPServerConnector` SSL layer sources its keystore + truststore from the **SDI server's** global TLS config (via `getRSInterface().getServerSocketFactory(true)`), not from connector parameters — so mTLS is configured at the server level plus the two booleans here. See §6 and docs/CONFIGURE.md §3a.
-- **Advanced:** request size limit, request timeout, max concurrent requests, verbose logging toggle.
+- **Advanced:** `healthPath` (unauthenticated GET liveness probe), `maxRequestBytes` (413 cap), `actorHeader` (trusted upstream header → `$mcp.actor` for the reverse-proxy actor-identity model). (request timeout, max concurrent requests, verbose logging remain deferred — see [BACKLOG.md](BACKLOG.md).)
 
 Include a form even though some fields are advanced, so the Config Editor reports no missing form.
 

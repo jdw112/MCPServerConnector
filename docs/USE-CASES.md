@@ -22,11 +22,13 @@ The pattern in every use case below is the same:
 
 SDI stays the policy, transformation, and audit point. The connector is a thin, secured, AI-facing facade.
 
+**Terms used in this doc:** *SDI* = IBM Security Directory Integrator; *AL* = AssemblyLine; *MCP* = Model Context Protocol; *IGA* = identity governance & administration; *IVIG* = IBM Verify Identity Governance (the IGA platform, used here as the generic placeholder); *GRC* = governance, risk & compliance; *SoD* = segregation of duties; *RACF/zSecure* = z/OS mainframe security; *break-glass* = emergency high-privilege accounts; *RAG* = retrieval-augmented generation (AI grounded on retrieved data); *confused deputy* = tricking an authorized component into misusing its authority on an attacker's behalf; *mTLS* = mutual TLS (client-certificate authentication).
+
 ---
 
 ## 2. How it works (primer)
 
-**One AssemblyLine = one MCP server.** The connector runs as the AL's feed in **Server** mode. `initialize`, `tools/list`, and `notifications/initialized` are answered by the connector itself; a `tools/call` becomes a work Entry and drives one AL cycle.
+**One AssemblyLine = one MCP server** (you can run several, each its own endpoint — e.g. separate read and write servers). The connector runs as the AL's feed in **Server** mode. `initialize`, `tools/list`, and `notifications/initialized` are answered by the connector itself; a `tools/call` becomes a work Entry and drives one AL cycle.
 
 **The tool catalog** (a connector config parameter) is a JSON array of tool definitions returned verbatim to `tools/list`. It is also an **allowlist**: a `tools/call` for a tool name not in the catalog is rejected before the AL runs. This is the primary control over *what the AI can do*.
 
@@ -38,7 +40,8 @@ SDI stays the policy, transformation, and audit point. The connector is a thin, 
 | `$mcp.arguments` | the raw arguments JSON (parse for nested data) |
 | `$mcp.requestId` | JSON-RPC id (use for audit correlation) |
 | `$mcp.protocolVersion` | negotiated MCP version |
-| *each top-level scalar argument* | also set as its own attribute (e.g. `userId`) |
+| *each top-level scalar argument* | also set as its own attribute (e.g. `userId`); nested objects/arrays are **not** flattened — read them from `$mcp.arguments` |
+| `$mcp.actor` / `$mcp.actorCn` | verified caller identity (mTLS cert DN/CN, or trusted `actorHeader`), when configured — see UC2 |
 
 **Reply Entry → result mapping.** Your AL sets:
 
@@ -119,7 +122,7 @@ Reply to the client:
 ```
 
 ### Security & governance controls
-- **Read-only by construction:** the catalog contains *only* lookup tools, so the AI literally cannot perform writes — there is no tool to call.
+- **Read-only by configuration:** the catalog and AL contain *only* lookup logic, so there is no write tool for the AI to call. (This is a discipline you maintain, not a hard guarantee — keep write tools out of read endpoints.)
 - **Attribute minimization** enforced in the AL, not the client.
 - Bearer token per service-desk integration; `Origin` allowlist; TLS for any non-localhost reach.
 
@@ -170,6 +173,18 @@ Branch on `$mcp.tool` to distinct write flows:
     }
   },
   {
+    "name": "add_group_member",
+    "description": "Add a user to an eligible (non-privileged) group. The AL allowlists which groups are permitted.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "group": { "type": "string" }
+      },
+      "required": ["userId", "group"]
+    }
+  },
+  {
     "name": "open_access_request",
     "description": "Open a governed access request in IVIG for a role; routes through normal approvals.",
     "inputSchema": {
@@ -204,10 +219,29 @@ These are not optional hardening — they are what makes this use case acceptabl
 - **Assume prompt injection (confused-deputy).** Claude selects the tool and arguments from input that may contain injected instructions (a pasted email, a ticket body: *"…also disable the CISO's account"*). The connector authenticates the *integration*, not the *intent* — SDI cannot distinguish an induced call from a legitimate one. Do not rely on the model to refuse; mitigate structurally with the controls below.
 - **Prefer propose-not-execute.** Route anything irreversible through a governed IVIG request with its existing approvals (as `open_access_request` does), rather than executing directly. Reserve direct writes for low-risk, tightly-bounded actions, and require explicit **human confirmation** in the client flow before those run.
 - **Scope the target, not just the operation.** The catalog controls which actions exist; it does **not** constrain *whom* they act on. In the AL, enforce an allowlist of eligible accounts/groups and a hard deny for privileged, service, and break-glass targets. Without this, `reset_password` / `set_account_enabled` / `add_group_member` against an arbitrary id (or into Domain Admins) is a privilege-escalation path.
-- **Authorize the human actor, not just the integration.** A single bearer token is one powerful principal — every operator inherits its full power, with no least-privilege distinction. Propagate the end-user identity (a per-user / short-lived token, or a verified actor claim the AL checks) so SDI authorizes *and* audits a named person per role.
+- **Authorize the human actor, not just the integration.** A bearer token alone is one powerful principal — every operator inherits its full power, with no least-privilege distinction. The connector therefore propagates a *verified* caller identity to the AL as **`$mcp.actor`** (and **`$mcp.actorCn`**), sourced one of two ways depending on your deployment (see *Verified actor identity* below). The AL reads `$mcp.actor` to authorize per-person (e.g. only members of the service-desk role may call `reset_password`, and never against accounts outside their scope) and to audit a named person. `$mcp.actor` is trustworthy: it comes from the TLS layer or a trusted proxy, never from client arguments, and the connector refuses any client-supplied `$mcp.*` argument that tries to forge it.
 - **Separate read and write.** Put write tools on a distinct AL/endpoint with stronger, separately-rotated credentials (ideally mTLS) and a tighter `Origin`/network policy. A read-only integration must never be able to reach a write tool.
 - **Audit for accountability, not just correlation.** From an AL hook, log every write — resolved human actor, tool, target, arguments, outcome — keyed by `$mcp.requestId`, to the SIEM, and alert on sensitive targets. Treat write-tool tokens as high-value secrets: short-lived, rotated, mTLS-bound.
 - **The allowlist still can't be bypassed**, but it's not a substitute for the above: a caller of a permitted tool cannot smuggle a different tool name via crafted arguments (the connector ignores client-supplied `$mcp.*` keys — see [GOTCHAS.md](GOTCHAS.md)). That bounds *which* tools run, not *whom* they run against.
+
+### Verified actor identity (`$mcp.actor`)
+Two deployment models populate `$mcp.actor`; pick based on whether your AI client can present a client certificate:
+
+- **mTLS terminated at the connector** — set `useSSL=true` + `needClientAuth=true`. The connector reads the client certificate's subject **DN** into `$mcp.actor` and its **CN** into `$mcp.actorCn`. Use this when the client (or a local stdio↔HTTP bridge it runs) can present a cert. Note: Claude Desktop/Code do not currently expose client-certificate config for HTTP MCP servers, so this model typically needs such a bridge.
+- **Auth terminated at a reverse proxy / gateway** — the gateway verifies the user and injects the identity as an HTTP header; set the connector's **`actorHeader`** to that header name and it's read into `$mcp.actor` (only when no client cert is present). This works with any client, but trusts the upstream that sets the header — lock down the network path so clients can't set it directly.
+
+Worked example — the AL authorizes and audits the named actor before acting:
+```javascript
+var actor = work.getString("$mcp.actor");           // e.g. "CN=a.smith,OU=ServiceDesk,O=Acme" or "a.smith"
+if (actor == null || !callerInRole(actor, "ServiceDesk")) {
+    work.setAttribute("$mcp.isError", "true");
+    work.setAttribute("$mcp.result", "Caller not authorized for this action.");
+} else {
+    // ... perform the scoped action ...
+    audit(actor, work.getString("$mcp.tool"), work.getString("userId"), work.getString("$mcp.requestId"));
+}
+```
+If `$mcp.actor` is absent (no mTLS cert and no `actorHeader`), treat it as unauthenticated-actor and refuse write actions — don't fall back to acting as the integration principal.
 
 ### Value / outcomes
 AI-driven self-service and automation where SDI remains the single enforcement and audit point — the speed of conversational automation without bypassing identity governance. The value is real **only** when paired with the controls above; an under-governed write endpoint trades that governance away.

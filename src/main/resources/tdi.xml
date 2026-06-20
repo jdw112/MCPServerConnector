@@ -22,6 +22,7 @@
 				<parameter name="allowedOrigins"></parameter>
 				<parameter name="healthPath"></parameter>
 				<parameter name="maxRequestBytes">0</parameter>
+				<parameter name="actorHeader"></parameter>
 			</Configuration>
 			<Schema name="Input">
 				<SchemaItem>
@@ -43,6 +44,14 @@
 				</SchemaItem>
 				<SchemaItem>
 					<Name>$mcp.arguments</Name>
+					<Syntax>String</Syntax>
+				</SchemaItem>
+				<SchemaItem>
+					<Name>$mcp.actor</Name>
+					<Syntax>String</Syntax>
+				</SchemaItem>
+				<SchemaItem>
+					<Name>$mcp.actorCn</Name>
 					<Syntax>String</Syntax>
 				</SchemaItem>
 			</Schema>
@@ -97,6 +106,7 @@
 				<FormSectionNames>
 					<ListItem>healthPath</ListItem>
 					<ListItem>maxRequestBytes</ListItem>
+					<ListItem>actorHeader</ListItem>
 				</FormSectionNames>
 			</FormSection>
 			<FormItemNames>
@@ -111,6 +121,7 @@
 				<ListItem>needClientAuth</ListItem>
 				<ListItem>healthPath</ListItem>
 				<ListItem>maxRequestBytes</ListItem>
+				<ListItem>actorHeader</ListItem>
 				<ListItem>$GLOBAL.debug</ListItem>
 			</FormItemNames>
 			<FormItem name="tcpPort">
@@ -172,6 +183,10 @@
 				<parameter name="description">MAX_REQ_BYTES_DESC</parameter>
 				<parameter name="label">MAX_REQ_BYTES_LABEL</parameter>
 				<parameter name="syntax">Number</parameter>
+			</FormItem>
+			<FormItem name="actorHeader">
+				<parameter name="description">ACTOR_HEADER_DESC</parameter>
+				<parameter name="label">ACTOR_HEADER_LABEL</parameter>
 			</FormItem>
 			<parameter name="title">CONN_TITLE</parameter>
 			<parameter name="formscript"><![CDATA[

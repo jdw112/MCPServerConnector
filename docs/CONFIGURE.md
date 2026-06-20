@@ -30,6 +30,7 @@ Advanced section:
 | --- | --- | --- |
 | Health Check Path | e.g. `/health` (or empty) | When set, an unauthenticated `GET` to this path returns `200 {"status":"ok",...}` for liveness probes. Empty = disabled. Distinct from the MCP endpoint's `GET` (which is `405`). |
 | Max Request Bytes | e.g. `1048576` (or `0`) | Bodies larger than this get `413`. `0` = no limit. Best-effort — see [BACKLOG.md](BACKLOG.md) caveat (the body is already read by the time it's checked). |
+| Trusted Actor Header | e.g. `X-Authenticated-User` (or empty) | Name of an HTTP header carrying the authenticated end-user identity, set by a trusted upstream proxy/gateway. Read into `$mcp.actor` when no mTLS client cert is present. **Only set if the upstream is trusted to set it** and clients can't reach the connector directly to forge it; otherwise leave empty. With mTLS terminated at the connector, leave this empty — the client cert populates `$mcp.actor` directly. |
 
 Security section (Authentication Mode, Bearer Token, Allowed Origins, Use SSL, Require Client Certificate) is now enforced as of Phase 3:
 
@@ -78,6 +79,7 @@ Add whatever AL logic should run per `tools/call`. The connector hands the AL a 
 - `$mcp.protocolVersion` — `2025-11-25`
 - `$mcp.arguments` — the raw JSON string of `params.arguments`
 - Any top-level **scalar** argument is also flattened directly onto the Entry under its own name (e.g. `arguments: {"text": "hello"}` also sets a plain `text` attribute) — convenient for simple tools that don't want to re-parse JSON. Nested objects/arrays are only available via `$mcp.arguments`.
+- `$mcp.actor` / `$mcp.actorCn` — the **verified** caller identity, when available: the mTLS client certificate's subject DN/CN, or the value of a configured trusted `actorHeader` (DN form in `$mcp.actor`, CN in `$mcp.actorCn`). Absent when neither mTLS nor `actorHeader` is in play. Use it for per-user authorization and audit in write flows; it cannot be forged via client arguments (the connector refuses client-supplied `$mcp.*` keys).
 
 As of Phase 2, `tools/call` validates the tool name against `toolCatalog` **before** invoking the AL: if the name isn't present in the catalog (or is missing), the connector responds directly with a tool-level error (`isError: true`, no AL cycle spent) rather than handing it to the Data Flow.
 

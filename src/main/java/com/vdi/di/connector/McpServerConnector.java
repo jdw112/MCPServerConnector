@@ -14,10 +14,15 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import javax.naming.ldap.LdapName;
+import javax.naming.ldap.Rdn;
+import javax.net.ssl.SSLSocket;
 
 /**
  * MCP (Model Context Protocol) server connector for VDI 10.
@@ -79,12 +84,22 @@ public class McpServerConnector extends HTTPServerConnector {
     public static final String ATTR_MCP_STRUCTURED = "$mcp.structured";
     public static final String ATTR_MCP_IS_ERROR = "$mcp.isError";
 
+    /** Verified caller identity passed to the AL: subject DN (and CN) of the mTLS client cert, or a trusted actorHeader value. */
+    public static final String ATTR_MCP_ACTOR = "$mcp.actor";
+    public static final String ATTR_MCP_ACTOR_CN = "$mcp.actorCn";
+
     private static final String HTTP_OK = "200 OK";
     private static final String HTTP_ACCEPTED = "202 Accepted";
     private static final String CONTENT_TYPE_JSON = "application/json";
 
     /** JSON-RPC id of the in-flight tools/call, held between getNextEntry() and replyEntry(). */
     private Object pendingCallId;
+
+    /** Per-connection client socket, captured in getNextClient() for lazy mTLS client-cert extraction. */
+    private Socket clientSocket;
+    private boolean certExtracted;
+    private String clientCertDn;
+    private String clientCertCn;
 
     @Override
     public String getVersion() {
@@ -148,6 +163,9 @@ public class McpServerConnector extends HTTPServerConnector {
             }
             throw new RetryEntryException("McpServerConnector: failed to initialize connection: " + e.getMessage());
         }
+        // Keep the socket so the per-connection instance can read the verified
+        // mTLS client-cert identity later (lazily, once the handshake is done).
+        client.clientSocket = socket;
         return client;
     }
 
@@ -155,6 +173,45 @@ public class McpServerConnector extends HTTPServerConnector {
         Field field = HTTPServerConnector.class.getDeclaredField("mServerSocket");
         field.setAccessible(true);
         return (ServerSocket) field.get(this);
+    }
+
+    /**
+     * Read the verified mTLS client-certificate identity (subject DN + CN) from
+     * this connection's socket, once. Done lazily (called from buildToolCallEntry,
+     * after the request was read, so the TLS handshake is complete). No SSL / no
+     * client cert presented => leaves the identity null (no actor).
+     */
+    private void extractClientCertIfNeeded() {
+        if (certExtracted) {
+            return;
+        }
+        certExtracted = true;
+        if (!(clientSocket instanceof SSLSocket)) {
+            return;
+        }
+        try {
+            Certificate[] chain = ((SSLSocket) clientSocket).getSession().getPeerCertificates();
+            if (chain != null && chain.length > 0 && chain[0] instanceof X509Certificate) {
+                clientCertDn = ((X509Certificate) chain[0]).getSubjectX500Principal().getName();
+                clientCertCn = extractCn(clientCertDn);
+            }
+        } catch (Exception e) {
+            // no verified peer certificate available; actor stays null
+        }
+    }
+
+    /** Pull the CN component out of an X.500 DN, or null if none. */
+    private static String extractCn(String dn) {
+        try {
+            for (Rdn rdn : new LdapName(dn).getRdns()) {
+                if ("CN".equalsIgnoreCase(rdn.getType())) {
+                    return rdn.getValue().toString();
+                }
+            }
+        } catch (Exception e) {
+            // malformed DN — fall through
+        }
+        return null;
     }
 
     /** True if the connection arrived on the configured bindAddress (or no/0.0.0.0 bindAddress configured = any). */
@@ -485,6 +542,26 @@ public class McpServerConnector extends HTTPServerConnector {
         work.setAttribute(ATTR_MCP_REQUEST_ID, id != null ? id.toString() : "");
         work.setAttribute(ATTR_MCP_PROTOCOL_VERSION, reqVersion);
         work.setAttribute(ATTR_MCP_ARGUMENTS, argumentsObj.serialize());
+
+        // Verified caller identity for AL-side authorization/audit. Trustworthy
+        // because it comes from the mTLS client cert (or a trusted-proxy header),
+        // NOT from client-supplied arguments — and the scalar-flatten loop below
+        // refuses $mcp.* keys, so a caller cannot forge $mcp.actor.
+        extractClientCertIfNeeded();
+        String actor = clientCertDn;
+        String actorCn = clientCertCn;
+        if (actor == null) {
+            String hdrName = getParam("actorHeader");
+            if (hdrName != null && !hdrName.trim().isEmpty()) {
+                actor = getHeader(httpEntry, hdrName.trim()); // trusts the upstream that sets it
+            }
+        }
+        if (actor != null) {
+            work.setAttribute(ATTR_MCP_ACTOR, actor);
+        }
+        if (actorCn != null) {
+            work.setAttribute(ATTR_MCP_ACTOR_CN, actorCn);
+        }
 
         // §3.2: flatten top-level scalar arguments directly onto the Entry too,
         // so the AL's Data Flow can read e.g. work.text instead of always having
