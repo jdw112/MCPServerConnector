@@ -187,15 +187,19 @@ function generateBearerToken() {
 	var token = "" + sb.toString();
 	form.setConfig("bearerToken", token);
 	form.updateControl("bearerToken");
-	// The info dialog text isn't selectable, so also put the token on the system
-	// clipboard — the user can paste it straight into their MCP client.
+	// Best-effort: copy to the system clipboard (StringSelection is its own
+	// ClipboardOwner). AWT clipboard access from the CE script engine isn't
+	// reliable on every platform, so this is a bonus, not the primary path.
 	try {
 		var selection = new Packages.java.awt.datatransfer.StringSelection(token);
-		Packages.java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+		Packages.java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, selection);
 	} catch (e) {
-		// clipboard unavailable; token is still shown in the dialog and saved to the field
+		// ignore — the selectable dialog below always lets the user copy manually
 	}
-	form.alert(form.translate("GEN_TOKEN_MSG") + "\n\n" + token);
+	// Show the token in an editable input field (NOT a plain info dialog, whose
+	// text can't be selected) so it can always be selected and copied regardless
+	// of clipboard availability. The 2-arg overload prefills the editable field.
+	Packages.javax.swing.JOptionPane.showInputDialog(form.translate("GEN_TOKEN_MSG"), token);
 }
 ]]></parameter>
 		</Form>
