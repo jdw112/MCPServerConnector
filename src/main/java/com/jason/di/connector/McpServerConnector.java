@@ -372,10 +372,14 @@ public class McpServerConnector extends HTTPServerConnector {
         // which is what we actually want for JSON parsing.
         String body = httpEntry.getString("http.bodyAsString");
         JSONObject rpc;
+        // Catch Throwable, not just Exception: JSON4J's parser is recursive, so a
+        // deeply nested payload throws StackOverflowError (an Error, not an
+        // Exception). Without this it would propagate and kill the AL cycle
+        // instead of returning a clean JSON-RPC parse error.
         try {
             rpc = JSONObject.parse(body == null ? "" : body);
-        } catch (Exception e) {
-            sendError(httpEntry, null, -32700, "Parse error: " + e.getMessage());
+        } catch (Throwable t) {
+            sendError(httpEntry, null, -32700, "Parse error: " + t.getClass().getSimpleName());
             return null;
         }
 
@@ -474,10 +478,21 @@ public class McpServerConnector extends HTTPServerConnector {
         // so the AL's Data Flow can read e.g. work.text instead of always having
         // to re-parse $mcp.arguments for simple cases. Nested objects/arrays are
         // only available via $mcp.arguments.
+        //
+        // SECURITY: never let a client-supplied argument named "$mcp.*" overwrite
+        // a reserved attribute. Without this, a call to a whitelisted tool could
+        // smuggle {"$mcp.tool":"<other tool>"} in its arguments and clobber the
+        // validated tool name set above — bypassing the toolCatalog allowlist that
+        // the AL branches on. Reserved keys are skipped; they remain only as the
+        // values the connector itself set.
         for (Object key : argumentsObj.keySet()) {
+            String name = key.toString();
+            if (name.startsWith("$mcp.")) {
+                continue;
+            }
             Object value = argumentsObj.get(key);
             if (value instanceof String || value instanceof Number || value instanceof Boolean) {
-                work.setAttribute(key.toString(), value.toString());
+                work.setAttribute(name, value.toString());
             }
         }
 
