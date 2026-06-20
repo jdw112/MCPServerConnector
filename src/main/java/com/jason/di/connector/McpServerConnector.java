@@ -263,11 +263,15 @@ public class McpServerConnector extends HTTPServerConnector {
     }
 
     /**
-     * §2/§6: validate Origin when allowedOrigins is configured. Left
-     * permissive (no allowedOrigins configured, or no Origin header sent at
-     * all — e.g. curl/MCP Inspector/non-browser clients) to match the
-     * connector's localhost-by-default v1 posture documented in
-     * docs/CONFIGURE.md.
+     * §2/§6: validate Origin against allowedOrigins.
+     *
+     * If allowedOrigins is empty, Origin checking is OFF (out-of-box / curl /
+     * non-browser clients). But once an allowlist IS configured, the Origin
+     * header is STRICTLY REQUIRED: a missing Origin is rejected (403), not
+     * allowed through. Otherwise an attacker could bypass the allowlist simply
+     * by omitting the header — which made the allowlist useless against
+     * non-browser clients. So: configure allowedOrigins to enforce origins;
+     * clients (incl. curl) must then send a matching Origin header.
      */
     private boolean isOriginAllowed(Entry httpEntry) {
         String allowed = getParam("allowedOrigins");
@@ -276,7 +280,7 @@ public class McpServerConnector extends HTTPServerConnector {
         }
         String origin = getHeader(httpEntry, "Origin");
         if (origin == null) {
-            return true;
+            return false;
         }
         for (String candidate : allowed.split(",")) {
             if (candidate.trim().equalsIgnoreCase(origin.trim())) {
@@ -334,10 +338,24 @@ public class McpServerConnector extends HTTPServerConnector {
         }
 
         // Health probe (GET on the configured healthPath) is answered before any
-        // endpoint/method/auth checks — liveness checks are unauthenticated and
-        // distinct from the MCP endpoint's GET (which returns 405).
+        // other check — liveness probes are unauthenticated and narrow (specific
+        // path + GET only).
         if (isHealthRequest(httpEntry)) {
             sendHealth(httpEntry);
+            return null;
+        }
+
+        // Security gates first (Origin, then auth) so unauthenticated/cross-origin
+        // callers can't probe endpoint path/method/size existence. Origin is the
+        // DNS-rebinding defense; bearer is identity. Intended for networked (not
+        // just localhost) deployments.
+        if (!isOriginAllowed(httpEntry)) {
+            sendTransportError(httpEntry, "403 Forbidden", "Origin not allowed.");
+            return null;
+        }
+
+        if (!isBearerAuthorized(httpEntry)) {
+            sendTransportError(httpEntry, "401 Unauthorized", "Missing or invalid bearer token.");
             return null;
         }
 
@@ -354,16 +372,6 @@ public class McpServerConnector extends HTTPServerConnector {
 
         if (isRequestTooLarge(httpEntry)) {
             sendTransportError(httpEntry, "413 Payload Too Large", "Request body exceeds the configured maximum.");
-            return null;
-        }
-
-        if (!isOriginAllowed(httpEntry)) {
-            sendTransportError(httpEntry, "403 Forbidden", "Origin not allowed.");
-            return null;
-        }
-
-        if (!isBearerAuthorized(httpEntry)) {
-            sendTransportError(httpEntry, "401 Unauthorized", "Missing or invalid bearer token.");
             return null;
         }
 
@@ -430,7 +438,11 @@ public class McpServerConnector extends HTTPServerConnector {
         JSONArray content = new JSONArray();
         JSONObject textBlock = new JSONObject();
         textBlock.put("type", "text");
-        textBlock.put("text", resultText != null ? resultText : aEntry.toString());
+        // SECURITY: when the AL set no $mcp.result, return a fixed generic message
+        // rather than serializing the whole work Entry — the entry may carry
+        // sensitive attributes the Data Flow loaded (user records, credentials),
+        // and dumping it would leak them to the MCP client.
+        textBlock.put("text", resultText != null ? resultText : "Tool completed but returned no result.");
         content.add(textBlock);
         result.put("content", content);
         result.put("isError", isError);

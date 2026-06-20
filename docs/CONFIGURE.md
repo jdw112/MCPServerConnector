@@ -41,7 +41,7 @@ Security section (Authentication Mode, Bearer Token, Allowed Origins, Use SSL, R
 
 - **`authMode: mtls`** does nothing extra in the connector's own Java logic — mutual TLS is enforced entirely by the inherited `HTTPServerConnector` SSL layer. Set **`Use SSL = true`** and **`Require Client Certificate = true`**; client-certificate verification then happens during the TLS handshake, before any connector code runs. See [§3a. Configuring mTLS](#3a-configuring-mtls) below — the keystore/truststore come from the **SDI server**, not from connector fields.
 - **`authMode: none`** performs no authentication check at all.
-- **Allowed Origins**: only enforced when non-empty. A request with no `Origin` header (curl, MCP Inspector, most non-browser clients) is always allowed through regardless of this setting — it only protects against browser-based DNS-rebinding-style attacks, per the MCP spec's intent.
+- **Allowed Origins**: origin checking is OFF when this is empty (out-of-box, curl, non-browser clients). **Once you set an allowlist, the `Origin` header becomes strictly required** — a request with a missing or non-matching `Origin` gets `403`. (This closes a bypass where omitting the header would skip the check; it also means curl must then send `-H 'Origin: <allowed>'`.) Set this for any networked deployment.
 
 ## 3a. Configuring mTLS
 
@@ -89,7 +89,7 @@ Have the AL branch on `$mcp.tool`, do its work, and set on the entry it hands to
 - `$mcp.structured` — (optional) a JSON string returned as `structuredContent`
 - `$mcp.isError` — (optional) `"true"` to mark the tool result as an MCP-level error
 
-If none of `$mcp.result`/`$mcp.structured`/`$mcp.isError` are set, the connector falls back to serializing the whole entry as the text result.
+If none of `$mcp.result`/`$mcp.structured`/`$mcp.isError` are set, the connector returns a fixed generic text result ("Tool completed but returned no result."). It deliberately does **not** serialize the work Entry, which could leak sensitive attributes your Data Flow loaded — always set `$mcp.result` (and/or `$mcp.structured`) explicitly.
 
 `initialize`, `notifications/initialized`, and `tools/list` are answered directly by the connector — they never reach the AL's Data Flow.
 

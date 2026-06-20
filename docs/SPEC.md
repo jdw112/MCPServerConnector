@@ -96,7 +96,7 @@ AL sets reserved attributes on the outgoing Entry; the connector maps them to th
 - `$mcp.result` → text content block.
 - `$mcp.structured` → JSON used for `structuredContent`.
 - `$mcp.isError` → `true` marks the tool result as an error (MCP tool-level error, not a JSON-RPC error).
-- Absence of all three → return a generic success with the Entry serialized as text.
+- Absence of all three → return a generic success with a fixed placeholder text ("Tool completed but returned no result."). **Security:** it does NOT serialize the work Entry (that would leak whatever attributes the Data Flow loaded — user records, credentials — to the MCP client). Always set `$mcp.result` explicitly.
 
 Map transport/dispatch failures (bad JSON, unknown method, auth failure) to **JSON-RPC error responses**; map AL business failures to **tool results with `isError: true`** with an actionable message.
 
@@ -123,6 +123,9 @@ Include a form even though some fields are advanced, so the Config Editor report
 ---
 
 ## 6. Security (v1)
+
+**Check ordering (post security review).** `getNextEntry()` runs gates in this order: health probe (unauthenticated, narrow GET) → `Origin` (403) → bearer auth (401) → `endpointPath` (404) → method (405) → size (413) → parse/dispatch. Security gates (Origin, auth) come *before* resource checks so unauthenticated/cross-origin callers can't probe path/method existence — chosen for networked (not just localhost) deployments.
+
 
 - **Bearer:** require `Authorization: Bearer <token>`; constant-time compare (`MessageDigest.isEqual`); 401 on mismatch. The `bearerToken` is a `PASSWORD`-syntax param, stored `encrypted="true"` and **auto-decrypted at runtime** by the engine — `getParam("bearerToken")` returns plaintext, no manual decryption needed (confirmed live, §8/Phase 3).
 - **TLS / mTLS:** handled by the inherited `HTTPServerConnector` SSL layer via `useSSL` + `needClientAuth`, using the **SDI server's** keystore/truststore (not connector params — see §4). `needClientAuth` is applied to the listening `SSLServerSocket` (`setNeedClientAuth(true)`), so our `getNextClient()` override — which accepts on that same socket — does not bypass client-cert verification (confirmed by disassembly). An untrusted/missing client cert fails at the TLS handshake, before the MCP layer runs. Never log secrets.
