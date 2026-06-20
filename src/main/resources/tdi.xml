@@ -20,6 +20,8 @@
 				<parameter name="bearerToken"></parameter>
 				<parameter name="toolCatalog">[]</parameter>
 				<parameter name="allowedOrigins"></parameter>
+				<parameter name="healthPath"></parameter>
+				<parameter name="maxRequestBytes">0</parameter>
 			</Configuration>
 			<Schema name="Input">
 				<SchemaItem>
@@ -93,6 +95,8 @@
 				<parameter name="title">Advanced</parameter>
 				<parameter name="initiallyExpanded">false</parameter>
 				<FormSectionNames>
+					<ListItem>healthPath</ListItem>
+					<ListItem>maxRequestBytes</ListItem>
 				</FormSectionNames>
 			</FormSection>
 			<FormItemNames>
@@ -105,6 +109,8 @@
 				<ListItem>allowedOrigins</ListItem>
 				<ListItem>useSSL</ListItem>
 				<ListItem>needClientAuth</ListItem>
+				<ListItem>healthPath</ListItem>
+				<ListItem>maxRequestBytes</ListItem>
 				<ListItem>$GLOBAL.debug</ListItem>
 			</FormItemNames>
 			<FormItem name="tcpPort">
@@ -154,6 +160,15 @@
 				<parameter name="description">CLIENT_AUTH_DESC</parameter>
 				<parameter name="label">CLIENT_AUTH_LABEL</parameter>
 				<parameter name="syntax">BOOLEAN</parameter>
+			</FormItem>
+			<FormItem name="healthPath">
+				<parameter name="description">HEALTH_PATH_DESC</parameter>
+				<parameter name="label">HEALTH_PATH_LABEL</parameter>
+			</FormItem>
+			<FormItem name="maxRequestBytes">
+				<parameter name="description">MAX_REQ_BYTES_DESC</parameter>
+				<parameter name="label">MAX_REQ_BYTES_LABEL</parameter>
+				<parameter name="syntax">Number</parameter>
 			</FormItem>
 			<parameter name="title">CONN_TITLE</parameter>
 		</Form>

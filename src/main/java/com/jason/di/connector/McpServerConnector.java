@@ -178,11 +178,71 @@ public class McpServerConnector extends HTTPServerConnector {
         if (configured == null || configured.trim().isEmpty()) {
             return true;
         }
+        return configured.trim().equals(requestPath(httpEntry));
+    }
+
+    /** Request path without query string: http.base, falling back to http.url. */
+    private String requestPath(Entry httpEntry) {
         String path = httpEntry.getString("http.base");
-        if (path == null) {
-            path = httpEntry.getString("http.url");
+        return path != null ? path : httpEntry.getString("http.url");
+    }
+
+    /** GET on the configured healthPath (when set non-empty). */
+    private boolean isHealthRequest(Entry httpEntry) {
+        String healthPath = getParam("healthPath");
+        if (healthPath == null || healthPath.trim().isEmpty()) {
+            return false;
         }
-        return path == null || configured.trim().equals(path);
+        String method = httpEntry.getString("http.method");
+        if (method != null && !"GET".equalsIgnoreCase(method)) {
+            return false;
+        }
+        return healthPath.trim().equals(requestPath(httpEntry));
+    }
+
+    private void sendHealth(Entry httpEntry) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("status", "ok");
+        body.put("server", "mcp-server-connector");
+        body.put("version", VERSION_INFO);
+        sendJson(buildHttpReplyEntry(body, HTTP_OK));
+    }
+
+    /**
+     * §6/Advanced: reject over-large requests with 413 when maxRequestBytes > 0.
+     * Best-effort: the inherited HTTP parser has already buffered the body by the
+     * time we see the entry, so this guards processing (and signals the client),
+     * not the read itself — a true pre-read cap would need overriding the parser.
+     */
+    private boolean isRequestTooLarge(Entry httpEntry) {
+        int max = parseIntParam("maxRequestBytes", 0);
+        if (max <= 0) {
+            return false;
+        }
+        String contentLength = getHeader(httpEntry, "Content-Length");
+        if (contentLength != null) {
+            try {
+                if (Integer.parseInt(contentLength.trim()) > max) {
+                    return true;
+                }
+            } catch (NumberFormatException ignored) {
+                // fall through to the actual-body check
+            }
+        }
+        String body = httpEntry.getString("http.bodyAsString");
+        return body != null && body.getBytes(StandardCharsets.UTF_8).length > max;
+    }
+
+    private int parseIntParam(String name, int dflt) {
+        String v = getParam(name);
+        if (v == null || v.trim().isEmpty()) {
+            return dflt;
+        }
+        try {
+            return Integer.parseInt(v.trim());
+        } catch (NumberFormatException e) {
+            return dflt;
+        }
     }
 
     /**
@@ -273,6 +333,14 @@ public class McpServerConnector extends HTTPServerConnector {
             return null;
         }
 
+        // Health probe (GET on the configured healthPath) is answered before any
+        // endpoint/method/auth checks — liveness checks are unauthenticated and
+        // distinct from the MCP endpoint's GET (which returns 405).
+        if (isHealthRequest(httpEntry)) {
+            sendHealth(httpEntry);
+            return null;
+        }
+
         if (!isEndpointPathAllowed(httpEntry)) {
             sendTransportError(httpEntry, "404 Not Found", "No MCP endpoint at this path.");
             return null;
@@ -281,6 +349,11 @@ public class McpServerConnector extends HTTPServerConnector {
         String httpMethod = httpEntry.getString("http.method");
         if (httpMethod != null && !"POST".equalsIgnoreCase(httpMethod)) {
             sendTransportError(httpEntry, "405 Method Not Allowed", "Only POST is supported on this endpoint.");
+            return null;
+        }
+
+        if (isRequestTooLarge(httpEntry)) {
+            sendTransportError(httpEntry, "413 Payload Too Large", "Request body exceeds the configured maximum.");
             return null;
         }
 

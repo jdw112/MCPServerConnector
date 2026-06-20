@@ -24,6 +24,13 @@ cp target/mcp-server-connector.jar /path/to/ISVDI/jars/connectors/
 | Tool Catalog (JSON) | a JSON array of tool definitions, e.g.: `[{"name":"lookup_user","description":"Look up a user by id","inputSchema":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}}]` | Returned verbatim by `tools/list`. Must be valid JSON or it's treated as an empty catalog. |
 | Comment / Detailed Log | optional | |
 
+Advanced section:
+
+| Field | What to put | Notes |
+| --- | --- | --- |
+| Health Check Path | e.g. `/health` (or empty) | When set, an unauthenticated `GET` to this path returns `200 {"status":"ok",...}` for liveness probes. Empty = disabled. Distinct from the MCP endpoint's `GET` (which is `405`). |
+| Max Request Bytes | e.g. `1048576` (or `0`) | Bodies larger than this get `413`. `0` = no limit. Best-effort — see [BACKLOG.md](BACKLOG.md) caveat (the body is already read by the time it's checked). |
+
 Security section (Authentication Mode, Bearer Token, Allowed Origins, Use SSL, Require Client Certificate) is now enforced as of Phase 3:
 
 - **`authMode: bearer`** requires `Authorization: Bearer <bearerToken>` on every request (constant-time compared); missing/wrong token → `401`. If `bearerToken` is left blank while `authMode=bearer`, every request is rejected (fail closed, not open).
