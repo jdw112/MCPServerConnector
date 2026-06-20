@@ -6,6 +6,11 @@
 			<Configuration>
 				<parameter name="connectorType">com.jason.di.connector.McpServerConnector</parameter>
 				<parameter name="parserOption">Optional</parameter>
+				<!-- serverReply=true makes the AssemblyLine call replyEntry() at end of
+				     cycle for the tools/call path (which returns a work Entry). Without
+				     it, only the direct in-getNextEntry replies fire and tools/call
+				     hangs the client. Same flag the stock HTTPServerConnector sets. -->
+				<parameter name="serverReply">true</parameter>
 				<parameter name="endpointPath">/mcp</parameter>
 				<parameter name="bindAddress">127.0.0.1</parameter>
 				<parameter name="tcpPort">8443</parameter>

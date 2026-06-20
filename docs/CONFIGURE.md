@@ -149,6 +149,9 @@ Add a custom connector pointing at the endpoint URL (Settings → Connectors →
 - If `authMode=bearer`, the client is configured with the exact token value (just the value — see §3).
 - The URL path the client uses matches `endpointPath` exactly (else `404`).
 - Reaching the host on a non-localhost interface? `bindAddress` must allow it, and you need TLS + auth (don't expose plaintext bearer off localhost).
+- **`Allowed Origins`: leave it empty unless you know the client's `Origin`.** Real MCP clients (including Claude) send an `Origin` header. If you've populated `Allowed Origins`, a client whose `Origin` isn't on the list gets `403` and the connection fails. To find what a client actually sends, check the AL log for the parsed `Origin` header on an incoming request, then add that exact value. When in doubt for local testing, clear the field (empty = allow any).
+
+> Note: a `tools/call` from a real client needs `serverReply=true` on the connector config (set by default in this connector's `tdi.xml`). Without it, `initialize`/`tools/list` work but tool calls hang with no response — see [SPEC.md](SPEC.md) §1d. If you cloned/edited the connector config and tool calls hang, verify that parameter is present.
 
 ### Interop points to watch (v1 design choices, per [SPEC.md](SPEC.md) §2)
 
