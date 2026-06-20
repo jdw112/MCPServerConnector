@@ -86,7 +86,6 @@
 				<FormSectionNames>
 					<ListItem>authMode</ListItem>
 					<ListItem>bearerToken</ListItem>
-					<ListItem>generateBearerTokenButton</ListItem>
 					<ListItem>allowedOrigins</ListItem>
 					<ListItem>useSSL</ListItem>
 					<ListItem>needClientAuth</ListItem>
@@ -107,7 +106,6 @@
 				<ListItem>toolCatalog</ListItem>
 				<ListItem>authMode</ListItem>
 				<ListItem>bearerToken</ListItem>
-				<ListItem>generateBearerTokenButton</ListItem>
 				<ListItem>allowedOrigins</ListItem>
 				<ListItem>useSSL</ListItem>
 				<ListItem>needClientAuth</ListItem>
@@ -148,12 +146,9 @@
 				<parameter name="description">BEARER_TOKEN_DESC</parameter>
 				<parameter name="label">BEARER_TOKEN_LABEL</parameter>
 				<parameter name="syntax">PASSWORD</parameter>
-			</FormItem>
-			<FormItem name="generateBearerTokenButton">
 				<parameter name="script">generateBearerToken</parameter>
 				<parameter name="scriptLabel">GEN_TOKEN_BTN_LABEL</parameter>
 				<parameter name="scripthelp">GEN_TOKEN_BTN_HELP</parameter>
-				<parameter name="syntax">static</parameter>
 			</FormItem>
 			<FormItem name="allowedOrigins">
 				<parameter name="description">ALLOWED_ORIGINS_DESC</parameter>
@@ -192,6 +187,14 @@ function generateBearerToken() {
 	var token = "" + sb.toString();
 	form.setConfig("bearerToken", token);
 	form.updateControl("bearerToken");
+	// The info dialog text isn't selectable, so also put the token on the system
+	// clipboard — the user can paste it straight into their MCP client.
+	try {
+		var selection = new Packages.java.awt.datatransfer.StringSelection(token);
+		Packages.java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+	} catch (e) {
+		// clipboard unavailable; token is still shown in the dialog and saved to the field
+	}
 	form.alert(form.translate("GEN_TOKEN_MSG") + "\n\n" + token);
 }
 ]]></parameter>
