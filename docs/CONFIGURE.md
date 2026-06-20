@@ -19,8 +19,8 @@ cp target/mcp-server-connector.jar /path/to/ISVDI/jars/connectors/
 | Field | What to put | Notes |
 | --- | --- | --- |
 | TCP Port | e.g. `8443` | Required. Port the listener binds to. |
-| Bind Address | `127.0.0.1` | **Not yet enforced by code** — see Known limitations below. |
-| Endpoint Path | `/mcp` | **Not yet enforced by code** — see Known limitations below. |
+| Bind Address | `127.0.0.1` | Enforced post-accept: connections arriving on a different local interface are rejected. Empty or `0.0.0.0` = accept on any interface. See note below. |
+| Endpoint Path | `/mcp` | Requests to any other path get `404`. Empty = accept any path. |
 | Tool Catalog (JSON) | a JSON array of tool definitions, e.g.: `[{"name":"lookup_user","description":"Look up a user by id","inputSchema":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}}]` | Returned verbatim by `tools/list`. Must be valid JSON or it's treated as an empty catalog. |
 | Comment / Detailed Log | optional | |
 
@@ -121,6 +121,19 @@ Or point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) 
 - **Every request 401s even with the right-looking token** → the Bearer Token field almost certainly contains the wrong value. Most common cause: it holds `bearerToken=test123` (the whole pair) instead of `test123` (see §3). Clear the field to empty and retype just the token. Remember a TDI password field can append rather than replace on edit.
 - **`tools/call` always returns "Unknown tool"** → the Tool Catalog field is empty or doesn't list that tool name (see §4).
 
-## Known limitations (current state, Phase 3)
+## Protocol version negotiation
 
-`authMode`/`bearerToken`/`allowedOrigins` are now enforced (see above), as is rejecting non-`POST` methods with `405` and validating `MCP-Protocol-Version` on post-`initialize` requests with `400`. Still not enforced: `endpointPath` and `bindAddress` — the connector accepts requests on any path at the configured port regardless of those two fields' values. They remain form-only placeholders. Don't expose this beyond localhost without `useSSL`+`needClientAuth` (mTLS) or `authMode=bearer` configured.
+The connector supports protocol versions `2025-11-25` (preferred), `2025-06-18`, and `2025-03-26`. On `initialize`, if the client requests one of these it's echoed back; otherwise the connector advertises `2025-11-25`. On later requests the `MCP-Protocol-Version` header is accepted if it's any supported version (absent header is also allowed); anything else → `400`. This keeps real clients (e.g. Claude) working even if they negotiate an older supported version rather than only the newest.
+
+## Bind address enforcement note
+
+The inherited `HTTPServerConnector` always binds its listening socket to all interfaces (`0.0.0.0`) — it has no per-address bind option. `bindAddress` is therefore enforced *after* a connection is accepted: if the connection didn't arrive on the configured local address, it's closed and skipped. This effectively restricts which interface the service answers on, but the socket itself still listens broadly, so it's a guard rather than a true bind. For hard network isolation, also use OS/firewall rules.
+
+## Known limitations (current state, end of Phase 3)
+
+Enforced: `405` (non-`POST`), `404` (wrong `endpointPath`), `403` (disallowed `Origin`), `401` (bearer), `400` (unsupported `MCP-Protocol-Version`), and `bindAddress` (post-accept, see above). Deliberately **not** implemented, with rationale:
+- **Request size limit** — the inherited HTTP parser reads the full request body before the connector sees the entry, so a pre-read byte cap would require overriding the parser itself; deferred.
+- **Request/idle timeout** — partially covered by the inherited `idleConnectionTimeout` parameter.
+- **Max concurrent requests** — governed by the AssemblyLine pool size, a deployment/AL-config concern rather than connector code.
+
+Don't expose this beyond localhost without `useSSL`+`needClientAuth` (mTLS) or `authMode=bearer` configured.

@@ -9,10 +9,12 @@ import com.ibm.json.java.JSONObject;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.NoSuchElementException;
 import java.util.Set;
@@ -53,7 +55,20 @@ import java.util.Set;
 public class McpServerConnector extends HTTPServerConnector {
 
     public static final String VERSION_INFO = "0.1.0-SNAPSHOT";
+
+    /** Server's preferred protocol version, returned by initialize when the client doesn't request a supported one. */
     public static final String PROTOCOL_VERSION = "2025-11-25";
+
+    /**
+     * Versions we'll interoperate with. The JSON-RPC surface we implement
+     * (initialize/tools.list/tools.call) is stable across these, so we accept
+     * any of them on the MCP-Protocol-Version header and echo a client's
+     * requested version back from initialize if it's one of these. Keeps us
+     * compatible with real clients (e.g. Claude) that may negotiate an older
+     * version rather than only our single preferred one.
+     */
+    private static final Set<String> SUPPORTED_PROTOCOL_VERSIONS = new HashSet<>(Arrays.asList(
+            "2025-11-25", "2025-06-18", "2025-03-26"));
 
     public static final String ATTR_MCP_TOOL = "$mcp.tool";
     public static final String ATTR_MCP_REQUEST_ID = "$mcp.requestId";
@@ -102,6 +117,21 @@ public class McpServerConnector extends HTTPServerConnector {
             return null;
         }
 
+        // bindAddress enforcement. The inherited HTTPServerConnector binds the
+        // listening socket to all interfaces (0.0.0.0) — it has no per-address
+        // bind option. So we enforce bindAddress post-accept: reject any
+        // connection that didn't arrive on the configured local address, then
+        // RetryEntryException to go accept the next one (NOT return null, which
+        // would terminate the listener). This restricts which interface the
+        // service is effectively reachable on even though the socket listens
+        // broadly. See docs/CONFIGURE.md.
+        if (!isLocalAddressAllowed(socket)) {
+            String got = socket.getLocalAddress() == null ? "?" : socket.getLocalAddress().getHostAddress();
+            socket.close();
+            throw new RetryEntryException("McpServerConnector: rejected connection received on " + got
+                    + " (bindAddress=" + getParam("bindAddress") + ")");
+        }
+
         McpServerConnector client = new McpServerConnector();
         client.setServerConnector(this);
         client.setConfiguration(this.getConfiguration());
@@ -125,6 +155,34 @@ public class McpServerConnector extends HTTPServerConnector {
         Field field = HTTPServerConnector.class.getDeclaredField("mServerSocket");
         field.setAccessible(true);
         return (ServerSocket) field.get(this);
+    }
+
+    /** True if the connection arrived on the configured bindAddress (or no/0.0.0.0 bindAddress configured = any). */
+    private boolean isLocalAddressAllowed(Socket socket) {
+        String bindAddr = getParam("bindAddress");
+        if (bindAddr == null || bindAddr.trim().isEmpty() || "0.0.0.0".equals(bindAddr.trim())) {
+            return true;
+        }
+        InetAddress local = socket.getLocalAddress();
+        return local != null && bindAddr.trim().equals(local.getHostAddress());
+    }
+
+    /**
+     * §2: endpointPath enforcement. When endpointPath is configured non-empty,
+     * a request to any other path gets 404. http.base is the request path
+     * without query string (confirmed via the CE's Entry dumps); fall back to
+     * http.url. Empty endpointPath = accept any path (permissive).
+     */
+    private boolean isEndpointPathAllowed(Entry httpEntry) {
+        String configured = getParam("endpointPath");
+        if (configured == null || configured.trim().isEmpty()) {
+            return true;
+        }
+        String path = httpEntry.getString("http.base");
+        if (path == null) {
+            path = httpEntry.getString("http.url");
+        }
+        return path == null || configured.trim().equals(path);
     }
 
     /**
@@ -196,10 +254,10 @@ public class McpServerConnector extends HTTPServerConnector {
                 expected.getBytes(StandardCharsets.UTF_8));
     }
 
-    /** §2: absent header is allowed (spec default is 2025-03-26); present-and-mismatched is rejected. */
+    /** §2: absent header is allowed (spec default is 2025-03-26); present-and-unsupported is rejected. */
     private boolean isProtocolVersionAcceptable(Entry httpEntry) {
         String header = getHeader(httpEntry, "MCP-Protocol-Version");
-        return header == null || PROTOCOL_VERSION.equals(header);
+        return header == null || SUPPORTED_PROTOCOL_VERSIONS.contains(header);
     }
 
     private void sendTransportError(Entry httpEntry, String httpStatus, String message) throws Exception {
@@ -212,6 +270,11 @@ public class McpServerConnector extends HTTPServerConnector {
     public Entry getNextEntry() throws Exception {
         Entry httpEntry = super.getNextEntry();
         if (httpEntry == null) {
+            return null;
+        }
+
+        if (!isEndpointPathAllowed(httpEntry)) {
+            sendTransportError(httpEntry, "404 Not Found", "No MCP endpoint at this path.");
             return null;
         }
 
@@ -260,7 +323,7 @@ public class McpServerConnector extends HTTPServerConnector {
 
         switch (method) {
             case "initialize":
-                sendInitializeResult(httpEntry, id);
+                sendInitializeResult(httpEntry, id, rpc);
                 return null;
             case "notifications/initialized":
                 sendAccepted(httpEntry);
@@ -320,10 +383,18 @@ public class McpServerConnector extends HTTPServerConnector {
 
         pendingCallId = id;
 
+        // Reflect the protocol version the client is actually using on this
+        // request (the MCP-Protocol-Version header, which a compliant client
+        // sets to whatever initialize negotiated), falling back to our default.
+        String reqVersion = getHeader(httpEntry, "MCP-Protocol-Version");
+        if (reqVersion == null) {
+            reqVersion = PROTOCOL_VERSION;
+        }
+
         Entry work = new Entry();
         work.setAttribute(ATTR_MCP_TOOL, toolName);
         work.setAttribute(ATTR_MCP_REQUEST_ID, id != null ? id.toString() : "");
-        work.setAttribute(ATTR_MCP_PROTOCOL_VERSION, PROTOCOL_VERSION);
+        work.setAttribute(ATTR_MCP_PROTOCOL_VERSION, reqVersion);
         work.setAttribute(ATTR_MCP_ARGUMENTS, argumentsObj.serialize());
 
         // §3.2: flatten top-level scalar arguments directly onto the Entry too,
@@ -383,9 +454,21 @@ public class McpServerConnector extends HTTPServerConnector {
         sendJson(buildHttpReplyEntry(response, HTTP_OK));
     }
 
-    private void sendInitializeResult(Entry httpEntry, Object id) throws Exception {
+    /** Echo the client's requested protocolVersion if we support it; otherwise advertise our preferred one. */
+    private String negotiateProtocolVersion(JSONObject rpc) {
+        Object params = rpc.get("params");
+        if (params instanceof JSONObject) {
+            Object requested = ((JSONObject) params).get("protocolVersion");
+            if (requested instanceof String && SUPPORTED_PROTOCOL_VERSIONS.contains(requested)) {
+                return (String) requested;
+            }
+        }
+        return PROTOCOL_VERSION;
+    }
+
+    private void sendInitializeResult(Entry httpEntry, Object id, JSONObject rpc) throws Exception {
         JSONObject result = new JSONObject();
-        result.put("protocolVersion", PROTOCOL_VERSION);
+        result.put("protocolVersion", negotiateProtocolVersion(rpc));
         JSONObject capabilities = new JSONObject();
         capabilities.put("tools", new JSONObject());
         result.put("capabilities", capabilities);
