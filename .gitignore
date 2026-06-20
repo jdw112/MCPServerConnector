@@ -1,5 +1,44 @@
+# --- Build output ---
 target/
 *.class
-.DS_Store
+
+# --- Secrets / crypto material (never commit) ---
+# Keystores, truststores, private keys, certs, and SDI stash files.
+*.jks
+*.p12
+*.pfx
+*.keystore
+*.truststore
+*.key
+*.pem
+*.sth
+# Local/secret config overrides
+*-local.properties
+*.local
+settings.local.json
+secrets.properties
+
+# --- SDI / runtime artifacts (if anything is ever run in-tree) ---
+*.log
+logs/
+MetaMerge.log
+ibmdi.log
+derby.log
+
+# --- IDEs ---
+# IntelliJ
 .idea/
 *.iml
+# Eclipse (common for SDI/Config Editor work)
+.project
+.classpath
+.settings/
+.factorypath
+# VS Code
+.vscode/
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
+*~
+*.swp
