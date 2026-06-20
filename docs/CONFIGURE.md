@@ -121,6 +121,45 @@ Or point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) 
 - **Every request 401s even with the right-looking token** → the Bearer Token field almost certainly contains the wrong value. Most common cause: it holds `bearerToken=test123` (the whole pair) instead of `test123` (see §3). Clear the field to empty and retype just the token. Remember a TDI password field can append rather than replace on edit.
 - **`tools/call` always returns "Unknown tool"** → the Tool Catalog field is empty or doesn't list that tool name (see §4).
 
+## 6. Connecting Claude as the MCP client
+
+Once curl/MCP Inspector round-trips work, point a real MCP client at the same endpoint. The connector speaks Streamable HTTP at `http://<bindAddress>:<tcpPort><endpointPath>` (e.g. `http://127.0.0.1:8443/mcp`).
+
+### Claude Code (CLI)
+
+```bash
+# no auth
+claude mcp add --transport http vdi-mcp http://127.0.0.1:8443/mcp
+
+# with bearer auth (authMode=bearer)
+claude mcp add --transport http vdi-mcp http://127.0.0.1:8443/mcp \
+  --header "Authorization: Bearer test123"
+```
+
+Then in a Claude Code session the configured tools (e.g. `echo`, `server_time`) appear and can be invoked. Use `/mcp` in Claude Code to see connection status.
+
+### Claude Desktop
+
+Add a custom connector pointing at the endpoint URL (Settings → Connectors → Add custom connector). Bearer-token/header support in the desktop custom-connector UI varies by version; if it can't attach an `Authorization` header, test with `authMode=none` first to confirm connectivity, then layer auth back on.
+
+### Readiness checklist before the live test
+
+- Server running and the AssemblyLine started in Server mode.
+- `Tool Catalog` populated (else every tool call is "Unknown tool").
+- If `authMode=bearer`, the client is configured with the exact token value (just the value — see §3).
+- The URL path the client uses matches `endpointPath` exactly (else `404`).
+- Reaching the host on a non-localhost interface? `bindAddress` must allow it, and you need TLS + auth (don't expose plaintext bearer off localhost).
+
+### Interop points to watch (v1 design choices, per [SPEC.md](SPEC.md) §2)
+
+These are deliberate v1 limitations that a strict client *might* care about — worth checking against during the first real Claude connection:
+
+- **No SSE / streaming.** `GET` on the endpoint returns `405`; the connector only does single `application/json` responses, never `text/event-stream`. A spec-compliant client must treat server→client streaming as optional and not require it.
+- **Stateless — no `Mcp-Session-Id`.** The server never assigns a session id, so the client shouldn't send one back. Each request is independent.
+- **`notifications/initialized` returns `202`** with no body, as required.
+
+If Claude connects, lists tools, and successfully calls one end-to-end, that satisfies the §9 acceptance criteria — the real goal of the project.
+
 ## Protocol version negotiation
 
 The connector supports protocol versions `2025-11-25` (preferred), `2025-06-18`, and `2025-03-26`. On `initialize`, if the client requests one of these it's echoed back; otherwise the connector advertises `2025-11-25`. On later requests the `MCP-Protocol-Version` header is accepted if it's any supported version (absent header is also allowed); anything else → `400`. This keeps real clients (e.g. Claude) working even if they negotiate an older supported version rather than only the newest.
