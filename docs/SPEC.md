@@ -107,7 +107,7 @@ Map transport/dispatch failures (bad JSON, unknown method, auth failure) to **JS
 Parameters (use the `tdi.xml` form, password syntax for secrets, progressive disclosure per `<param>_changed()` convention):
 
 - **General:** `endpointPath` (default `/mcp`), `bindAddress`, `port`, `toolCatalog` (JSON).
-- **Security:** `authMode` (none | bearer | mtls), `bearerToken` (password), `allowedOrigins` (list), keystore/truststore paths + passwords (password), `requireClientCert` (mTLS).
+- **Security:** `authMode` (none | bearer | mtls), `bearerToken` (password), `allowedOrigins` (list), `useSSL` (boolean), `needClientAuth` (boolean, mTLS). **Correction vs. original plan:** there are deliberately *no* per-connector keystore/truststore path/password fields. The inherited `HTTPServerConnector` SSL layer sources its keystore + truststore from the **SDI server's** global TLS config (via `getRSInterface().getServerSocketFactory(true)`), not from connector parameters — so mTLS is configured at the server level plus the two booleans here. See §6 and docs/CONFIGURE.md §3a.
 - **Advanced:** request size limit, request timeout, max concurrent requests, verbose logging toggle.
 
 Include a form even though some fields are advanced, so the Config Editor reports no missing form.
@@ -124,9 +124,8 @@ Include a form even though some fields are advanced, so the Config Editor report
 
 ## 6. Security (v1)
 
-- **Bearer:** require `Authorization: Bearer <token>`; constant-time compare; 401 on mismatch.
-- **TLS:** server keystore via config; never log secrets.
-- **mTLS (optional):** truststore + `requireClientCert`; reject unknown client certs.
+- **Bearer:** require `Authorization: Bearer <token>`; constant-time compare (`MessageDigest.isEqual`); 401 on mismatch. The `bearerToken` is a `PASSWORD`-syntax param, stored `encrypted="true"` and **auto-decrypted at runtime** by the engine — `getParam("bearerToken")` returns plaintext, no manual decryption needed (confirmed live, §8/Phase 3).
+- **TLS / mTLS:** handled by the inherited `HTTPServerConnector` SSL layer via `useSSL` + `needClientAuth`, using the **SDI server's** keystore/truststore (not connector params — see §4). `needClientAuth` is applied to the listening `SSLServerSocket` (`setNeedClientAuth(true)`), so our `getNextClient()` override — which accepts on that same socket — does not bypass client-cert verification (confirmed by disassembly). An untrusted/missing client cert fails at the TLS handshake, before the MCP layer runs. Never log secrets.
 - Mask any secret-bearing config in logs/errors. Validate `Origin` (§2). Bind localhost unless explicitly opened.
 
 ---

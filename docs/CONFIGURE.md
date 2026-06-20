@@ -27,9 +27,38 @@ cp target/mcp-server-connector.jar /path/to/ISVDI/jars/connectors/
 Security section (Authentication Mode, Bearer Token, Allowed Origins, Use SSL, Require Client Certificate) is now enforced as of Phase 3:
 
 - **`authMode: bearer`** requires `Authorization: Bearer <bearerToken>` on every request (constant-time compared); missing/wrong token → `401`. If `bearerToken` is left blank while `authMode=bearer`, every request is rejected (fail closed, not open).
-- **`authMode: mtls`** does nothing extra in the connector's own logic — set `useSSL=true` and `needClientAuth=true` instead. Those two are inherited, unmodified `HTTPServerConnector` parameters; client certificate verification happens at the TLS handshake, before any of our code runs.
+
+  > ⚠️ **Enter only the token value in the Bearer Token field — not `bearerToken=...`.** The field holds the secret itself. If you paste `bearerToken=test123` (the whole `name=value` pair, e.g. copied from a properties file or this doc), the configured token becomes the literal 19-character string `bearerToken=test123`, while clients send just `test123` — so every request gets a `401` that looks like the code is broken when it isn't. This actually happened during testing; the giveaway is the configured value being longer than what you typed. The field is also a TDI password field that doesn't always select-all on focus, so editing can *append* to the old value rather than replace it — clear it completely (select-all, delete to empty) before typing a new token.
+
+- **`authMode: mtls`** does nothing extra in the connector's own Java logic — mutual TLS is enforced entirely by the inherited `HTTPServerConnector` SSL layer. Set **`Use SSL = true`** and **`Require Client Certificate = true`**; client-certificate verification then happens during the TLS handshake, before any connector code runs. See [§3a. Configuring mTLS](#3a-configuring-mtls) below — the keystore/truststore come from the **SDI server**, not from connector fields.
 - **`authMode: none`** performs no authentication check at all.
 - **Allowed Origins**: only enforced when non-empty. A request with no `Origin` header (curl, MCP Inspector, most non-browser clients) is always allowed through regardless of this setting — it only protects against browser-based DNS-rebinding-style attacks, per the MCP spec's intent.
+
+## 3a. Configuring mTLS
+
+Mutual TLS (client-certificate authentication) is handled by the stock `HTTPServerConnector` SSL machinery that this connector inherits, **not** by any connector-specific keystore field. Key consequence: the server's TLS identity and the set of trusted client CAs come from the **SDI server's own keystore/truststore configuration**, configured once at the server level — there are deliberately no per-connector keystore-path fields on the form.
+
+To enable it:
+
+1. **Server TLS identity (keystore).** Ensure the SDI server has a server keystore configured (e.g. `api.keystore` / the server SSL settings in `etc/global.properties` / `solution.properties`, such as the bundled `testserver.jks`). This provides the server certificate presented to clients.
+2. **Trust the client (truststore).** Import the client certificate — or the CA that issued it — into the SDI server's **truststore** so the server will accept that client cert. (Use the server's configured truststore; with the default test setup that may be the same JKS as the keystore.)
+3. **Turn it on at the connector.** On the Connection tab set:
+   - `Use SSL = true`
+   - `Require Client Certificate = true`
+   - (`Authentication Mode = mtls` is fine as a label, but it's these two booleans that actually enforce it. You can combine with `bearer` if you want both a client cert *and* a token.)
+4. **Restart** the AssemblyLine / server so the listener rebinds as a TLS socket.
+5. **Connect with a client cert.** The endpoint is now `https://`, and a request with no/untrusted client cert fails the TLS handshake (the connection never reaches the MCP layer). Example:
+
+   ```bash
+   curl --cert client.pem --key client.key --cacert server-ca.pem \
+     https://127.0.0.1:8443/mcp \
+     -H 'Content-Type: application/json' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+   ```
+
+Notes:
+- A missing or untrusted client certificate is rejected at the TLS layer with a handshake failure, not a JSON `401`/`403` — the connector code never sees the request, so there's no JSON-RPC error body to read.
+- This path is verified correct by disassembly of `HTTPServerConnector` (the listening `SSLServerSocket` has `setNeedClientAuth(true)` applied, and our `getNextClient()` override accepts on that same socket, so the client-cert check is not bypassed) but has **not** yet been exercised end-to-end with real certs.
 
 ## 4. Data Flow
 
@@ -76,7 +105,21 @@ curl -s -X POST http://127.0.0.1:8443/mcp \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"lookup_user","arguments":{"id":"123"}}}'
 ```
 
+With `authMode = bearer`, add the token header (note: just the value, matching exactly what's in the Bearer Token field — see the warning in §3):
+
+```bash
+curl -s -X POST http://127.0.0.1:8443/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer test123' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+```
+
 Or point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) at `http://127.0.0.1:<tcpPort><endpointPath>`.
+
+### Troubleshooting
+
+- **Every request 401s even with the right-looking token** → the Bearer Token field almost certainly contains the wrong value. Most common cause: it holds `bearerToken=test123` (the whole pair) instead of `test123` (see §3). Clear the field to empty and retype just the token. Remember a TDI password field can append rather than replace on edit.
+- **`tools/call` always returns "Unknown tool"** → the Tool Catalog field is empty or doesn't list that tool name (see §4).
 
 ## Known limitations (current state, Phase 3)
 
