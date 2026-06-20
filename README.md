@@ -25,9 +25,13 @@ mvn -Dvdi.home=/path/to/ISVDI package
 
 Defaults to `/Users/jason/Applications/ISVDI` if `-Dvdi.home` is omitted.
 
+## Prebuilt jar
+
+A prebuilt jar is checked in at [`dist/mcp-server-connector.jar`](dist/mcp-server-connector.jar) for convenience — grab it directly if you don't want to build. It depends only on jars already present in a VDI 10 install (nothing is repackaged), so it runs as-is. Rebuild from source (above) if you want to verify or modify it.
+
 ## Deploy
 
-Copy `target/mcp-server-connector.jar` to `VDI_install_dir/jars/connectors/`, restart the Config Editor / server, and the `MCPServerConnector` connector appears under Connectors. See [docs/CONFIGURE.md](docs/CONFIGURE.md) to build the AssemblyLine and connect a client.
+Copy the jar (`dist/mcp-server-connector.jar`, or `target/mcp-server-connector.jar` if you built it) to `VDI_install_dir/jars/connectors/`, restart the Config Editor / server, and the `MCPServerConnector` connector appears under Connectors. See [docs/CONFIGURE.md](docs/CONFIGURE.md) to build the AssemblyLine and connect a client.
 
 ## Quick connect (Claude Code)
 
