@@ -41,3 +41,7 @@ claude mcp add --transport http vdi-mcp http://127.0.0.1:8443/mcp \
 ```
 
 Start a fresh Claude Code session (tools register at session start), then ask it to use one of your configured tools.
+
+## License
+
+[MIT](LICENSE) — provided "as is", without warranty of any kind. IBM Security Directory Integrator and IBM Verify Identity Governance are trademarks of IBM; this is an independent connector, not an IBM product.
