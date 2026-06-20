@@ -40,6 +40,14 @@ A form field with `syntax=PASSWORD` is stored `encrypted="true"` in the config X
 
 `useSSL`/`needClientAuth` drive TLS via the inherited SSL layer, whose socket factory (`getRSInterface().getServerSocketFactory(true)`) sources keystore + truststore from the **SDI server's** global config — there are deliberately no per-connector keystore fields. `setNeedClientAuth(true)` is applied to the listening `SSLServerSocket`, so our `getNextClient()` accept doesn't bypass client-cert verification. A bad/missing client cert fails at the TLS handshake, before any connector code runs (so no JSON error body — just a handshake failure).
 
+## 8. The Config Editor is Eclipse/SWT — form scripts must use SWT, not AWT/Swing
+
+The CE (`ce/eclipsece`, an Eclipse RCP app — `org.eclipse.swt.cocoa.macosx` on macOS) runs **SWT**, not Swing/AWT. This bites form-script (`<parameter name="formscript">`) code two ways:
+- A raw AWT modal dialog (`javax.swing.JOptionPane.showInputDialog` with no parent) **freezes the CE on macOS** — AWT modals don't mix with the SWT/Cocoa main thread. Use `form.alert(...)` (the CE's own parented SWT dialog) for popups.
+- The AWT clipboard (`java.awt.Toolkit.getSystemClipboard()`) doesn't reliably reach the OS pasteboard from SWT. Use the **SWT clipboard**: `new org.eclipse.swt.dnd.Clipboard(Display.getCurrent())` + `setContents([text], [TextTransfer.getInstance()])`, then `dispose()`. Non-modal, so it can't hang the CE.
+
+The available form-script API (the `form` object) includes `getConfigValue`/`setConfig`/`updateControl`, `alert`, `translate`, `chooseFromList`, `setWaitCursor`/`setNormalCursor`. Java is reachable via `Packages.<fqcn>`; `new Packages...()` constructors work. See the "Generate Token" button (`generateBearerToken` in `tdi.xml`'s formscript) for a worked example.
+
 ## 7. Real MCP clients send an `Origin` header
 
 Browsers *and* Claude's MCP client send `Origin`. If `allowedOrigins` is non-empty and doesn't include the client's origin, the connection gets `403`. Leave `allowedOrigins` empty for local testing unless you know the exact value (check the AL log for the parsed `Origin` header). curl/MCP Inspector typically send no `Origin`, so they're unaffected — which can mask the issue until a real client connects.
