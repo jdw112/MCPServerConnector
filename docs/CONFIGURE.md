@@ -127,6 +127,16 @@ curl -s -X POST http://127.0.0.1:8443/mcp \
 
 Or point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) at `http://127.0.0.1:<tcpPort><endpointPath>`.
 
+### Full revalidation matrix
+
+To run the whole acceptance matrix (SPEC.md §9) in one shot — happy path plus every documented error branch (`401`/`400`/`403`/`404`/`405`/`202`, unknown-tool `isError`) — use [`scripts/revalidate.sh`](../scripts/revalidate.sh). It prints pass/fail per case and exits non-zero if any fail, so it doubles as a pre-deploy gate.
+
+```bash
+TOKEN=<bearer-token> ORIGIN=https://good.example ./scripts/revalidate.sh
+```
+
+Configurable via environment: `BASE`, `ENDPOINT`, `HEALTH`, `TOKEN`, `ORIGIN`, `PROTO`. `ORIGIN` must be an allowed origin once `allowedOrigins` is set (see §4), otherwise every case `403`s. Pass `--log` to tail the server log after the run (`LOGFILE` overrides the default path); `-h` prints usage.
+
 ### Troubleshooting
 
 - **Every request 401s even with the right-looking token** → the Bearer Token field almost certainly contains the wrong value. Most common cause: it holds `bearerToken=test123` (the whole pair) instead of `test123` (see §3). Clear the field to empty and retype just the token. Remember a TDI password field can append rather than replace on edit.
