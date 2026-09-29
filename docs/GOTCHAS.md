@@ -90,12 +90,22 @@ The Data Flow only ever writes `work`. The connector replies from **`conn`** (§
 TDI substitutes `$attr` in a connector parameter at **connector init from the work entry available then** — which for a feed/loop connector is effectively empty, so `$userId` reaches LDAP **literally** and matches nothing. **Link Criteria** *does* substitute (evaluated at lookup time), which is why the single-entry Lookups worked. For an **Iterator** whose filter needs a per-request value, set it in a **Before Initialize** hook:
 
 ```javascript
-var uid = work.getString("userId");
-thisConnector.getConfiguration().setParameter("ldapSearchFilter",
-  "(&(objectClass=groupOfNames)(member=uid=" + uid + ",ou=People,dc=example,dc=com))");
+if (work != null) {                                   // see the two caveats below
+  var uid = work.getString("userId");
+  thisConnector.connector.setParam("ldapSearchFilter",
+    "(&(objectClass=groupOfNames)(member=uid=" + uid + ",ou=People,dc=example,dc=com))");
+}
 ```
 
-**Symptom if broken:** AL log shows `search filter '(...member=uid=$userId,...)'` verbatim; `Loop Cycles:0`.
+Three things that each silently break this:
+
+1. **Use `thisConnector.connector.setParam(name, val)`.** `thisConnector.getConfiguration().setParameter(...)` writes a config object the search path does **not** read — the hook runs, no error, and the search uses the old filter. `.connector.setParam` writes the value `selectEntries` actually consults.
+2. **The connector needs a *local* `ldapSearchFilter`** for the setter to overwrite. If the field is empty / `InheritFrom [parent]`, set a placeholder (e.g. `(objectClass=inetOrgPerson)`) in the Connection tab so a local param exists — otherwise the set target and the read target differ and you get a match-all (or the parent's) filter.
+3. **Guard with `if (work != null)`.** A Before-Initialize hook can fire during **AL-startup `InitConnectors`** (eager init), where there is no work entry yet — `work.getString(...)` then throws `'work' is null`, which fails `InitConnectors` and **takes the whole AL down** (listener stays up, every request hangs). The guard makes startup a no-op and the per-request call real.
+
+Also **balance the filter string** — a stray quote/paren gives `InvalidSearchFilterException: Unbalanced parenthesis` (search fails, cycle aborts, `HTTP 000`) or a `Lexical error … <EOF>` that fails init. Build it as `"(&(objectClass=…)(member=uid=" + uid + "," + base + "))"` and count the parens.
+
+**Symptom if broken:** AL log shows `search filter '(...member=uid=$userId,...)'` verbatim, or the hook-set filter never appears at all (no `CTGDJQ017I` line); `Loop Cycles:0`.
 
 ## 13. "List" tools: nothing auto-collects — accumulate per cycle, and scope the Input map
 
@@ -121,3 +131,20 @@ work.setAttribute("$mcp.structured", "{\"found\":false}");
 The CE/engine script engine is IBM JScript, not Rhino/Nashorn. `someJavaArray.length` and `stringBuilder.length()` both throw `Java Bean property 'length' does not have a read method` — the interpreter resolves `.length` as a bean property before any call. Use `java.lang.reflect.Array.getLength(arr)` for array size and build strings with plain **JS string concatenation**, not `StringBuilder`. Ordinary method calls (`entry.getAttributeNames()`, `attr.size()`, `attr.getValue(i)`) are fine — only `length` collides.
 
 **Symptom if broken:** `Script interpreter error, line=N: Java Bean property 'length' does not have a read method`.
+
+## 16. Composite tools: a loop clobbers profile attributes that share a name
+
+A tool that does a profile Lookup **and** a groups Iterator in one branch (e.g. `get_user_overview`) shares one `work` entry across both. If both map the same attribute name — the user's `cn` from the Lookup and each group's `cn` from the Iterator — the loop **overwrites** the profile value every cycle, and the profile's is lost.
+
+Fix: give the loop its **own scratch names**, never the profile's. Map the group's `cn` to `gcn`, accumulate from `gcn`, and remove `gcn` after the loop:
+
+```javascript
+// Iterator Input map:  Name gcn  <-  Simple cn        (group cn lands on work.gcn, not work.cn)
+work.addAttributeValue("groups", work.getString("gcn"));   // accumulate reads the scratch...
+// after the loop:
+work.removeAttribute("gcn");                                // ...and clean the scratch, NOT cn
+```
+
+Two ways this bites while wiring it: the accumulate still reading the old name (`cn`) so `groups` never builds, and the cleanup deleting the **wrong** attribute (`cn` instead of `gcn`) so the user's name vanishes while the scratch leaks. Rule of thumb: the loop touches only names nothing else uses, and cleans up exactly those.
+
+**Symptom if broken:** an attribute the profile set is missing from the result, or shows the *last* iterated value; a scratch attribute (`gcn`) leaks into `structuredContent`.
