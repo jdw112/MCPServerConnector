@@ -15,6 +15,12 @@
 #   ORIGIN    an allowed Origin; required once the connector has an
 #             allowedOrigins allowlist configured (default https://good.example)
 #   PROTO     MCP protocol version to send        (default 2025-06-18)
+#   USERID    a seeded uid the happy-path tool cases look up (default alice)
+#
+# Cases 1-3 and 5-12 exercise the connector's transport + security matrix and are
+# use-case-independent. Cases 4/4b call the UC1 Identity Service Desk tools
+# (lookup_user, get_user_groups) against the Docker OpenLDAP seed; adjust them if
+# your AL exposes a different catalog.
 #
 # Flags:
 #   --log         tail the server log after the run (see LOGFILE)
@@ -32,6 +38,7 @@ HEALTH="${HEALTH:-/health}"
 TOKEN="${TOKEN:-}"
 ORIGIN="${ORIGIN:-https://good.example}"
 PROTO="${PROTO:-2025-06-18}"
+USERID="${USERID:-alice}"          # a seeded uid the UC1 happy-path cases look up
 LOGFILE="${LOGFILE:-/Users/jason/Applications/SOLDIR/logs/ibmdi.log}"
 
 SHOW_LOG=0
@@ -86,10 +93,10 @@ check "2  initialize"                      200 '"protocolVersion"' -- -X POST "$
   -d "$(printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"%s"}}' "$PROTO")"
 check "3  tools/list"                      200 '"tools"' -- -X POST "$URL" -H "$CT" -H "$AUTH" -H "$ORI" \
   -d "$(rpc 2 tools/list '')"
-check "4  tools/call server_time"          200 '"structuredContent"' -- -X POST "$URL" -H "$CT" -H "$AUTH" -H "$ORI" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"server_time","arguments":{}}}'
-check "4b tools/call echo"                 200 'echo: revalidate' -- -X POST "$URL" -H "$CT" -H "$AUTH" -H "$ORI" \
-  -d '{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"echo","arguments":{"text":"revalidate"}}}'
+check "4  tools/call lookup_user"          200 '"structuredContent"' -- -X POST "$URL" -H "$CT" -H "$AUTH" -H "$ORI" \
+  -d "$(printf '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"lookup_user","arguments":{"userId":"%s"}}}' "$USERID")"
+check "4b tools/call get_user_groups"      200 '"groups"' -- -X POST "$URL" -H "$CT" -H "$AUTH" -H "$ORI" \
+  -d "$(printf '{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"get_user_groups","arguments":{"userId":"%s"}}}' "$USERID")"
 check "5  missing bearer -> 401"           401 '' -- -X POST "$URL" -H "$CT" -H "$ORI" \
   -d "$(rpc 4 tools/list '')"
 check "6  wrong bearer -> 401"             401 '' -- -X POST "$URL" -H "$CT" -H "$ORI" -H "Authorization: Bearer WRONG" \

@@ -129,6 +129,38 @@ Reply to the client:
 ### Value / outcomes
 Faster mean-time-to-resolution; agents need no standing read access to source systems; a single audited egress; consistent, attribute-governed answers regardless of which back-end holds the data.
 
+### Running the demo (Docker OpenLDAP)
+
+A self-contained, reproducible instance of this use case ships in the repo, backed by a containerized OpenLDAP rather than AD/IVIG. The tool catalog above is the conceptual AD version; the runnable demo is adapted to OpenLDAP's schema (`inetOrgPerson` + `groupOfNames`, keyed on `uid`) and exposes five read-only tools: `lookup_user`, `get_user_groups`, `list_group_members`, `search_users`, and `get_user_overview` (a composite that returns profile **and** memberships in one call).
+
+**1. Start the directory.** From [`docker/`](../docker), bring up OpenLDAP (`osixia/openldap`, domain `example.com`). [`seed.ldif`](../docker/seed.ldif) loads on first init — 5 users and 3 groups with overlapping membership and a `manager` hierarchy:
+
+```bash
+cd docker && docker compose up -d
+```
+
+The custom LDIF loads only into a fresh data volume. To re-seed after editing it: `docker compose down -v && docker compose up -d`.
+
+**2. Run the AssemblyLine as an MCP server.** From the VDI solution directory, start the specific UC1 AssemblyLine with the VDI server runtime:
+
+```bash
+ibmdisrv -c MCP_Server_Example.xml -r MCPServer_LDAP
+```
+
+`-c` loads the solution config; `-r` runs the `MCPServer_LDAP` AssemblyLine, which *is* the MCP server. It listens (per its connector config) at `http://127.0.0.1:8443/mcp`, with an unauthenticated health probe at `/health`.
+
+**3. Call a tool.** With `authMode=bearer` and an `Origin` allow-list configured, a lookup looks like:
+
+```bash
+curl -s -X POST http://127.0.0.1:8443/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Origin: https://good.example' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"lookup_user","arguments":{"userId":"alice"}}}'
+```
+
+Point a real MCP client (e.g. Claude Code) at the same endpoint for the natural-language experience. See [CONFIGURE.md](CONFIGURE.md) for connector setup and the client-connection steps, and [`scripts/revalidate.sh`](../scripts/revalidate.sh) for the transport/security acceptance matrix. Gotchas hit while building this AL in the Config Editor are catalogued in [GOTCHAS.md](GOTCHAS.md) §9–§16.
+
 ---
 
 ## 4. Use Case 2 — Governed Account Actions / Self-Service Automation (controlled writes)
