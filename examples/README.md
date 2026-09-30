@@ -12,7 +12,11 @@ The runnable VDI solution for **Use Case 1** (AI-Assisted Identity Service Desk)
 Both secrets ship **blank** — set them before the AL will serve:
 
 - **`ldapAdminPwd`** (in the `.properties`) — set to the same value as `LDAP_ADMIN_PASSWORD` in [`../docker/docker-compose.yml`](../docker/docker-compose.yml).
-- **`bearerToken`** (in the `.xml`) — blank, so `authMode=bearer` fails closed (`401`) until you generate one on the `MCPServerConnection` **Connection tab** (Generate Token) in the Config Editor.
+- **`bearerToken`** (in the `.properties`) — blank, so `authMode=bearer` fails closed (`401`) until you set one. Create a strong random token and paste it as `bearerToken=<value>`:
+  ```bash
+  openssl rand -hex 32     # 64-char hex; use this exact value as each client's Bearer token
+  ```
+  (Or click **Generate Token** on the `MCPServerConnection` Connection tab in the Config Editor and copy the value.) It's plaintext here — keep real values out of git (see below); rotate by regenerating and updating the property and every client.
 
 ## Run it
 

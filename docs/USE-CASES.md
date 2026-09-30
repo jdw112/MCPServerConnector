@@ -144,7 +144,13 @@ The custom LDIF loads only into a fresh data volume. To re-seed after editing it
 **2. Set the secrets (shipped blank).** The example is committed **without** credentials, so two things must be set before it will serve:
 
 - **LDAP bind password** — set `ldapAdminPwd` in [`examples/MCP_Server_Example.properties`](../examples/MCP_Server_Example.properties) to the **same value** as `LDAP_ADMIN_PASSWORD` in `docker-compose.yml`. (The connector's `ldapPassword` resolves from this property.) `ldapAdminDN` defaults to the OpenLDAP admin DN, e.g. `cn=admin,dc=example,dc=com`.
-- **Bearer token** — the exported `bearerToken` is blank, so `authMode=bearer` **fails closed** (every call `401`) until you set one. In the Config Editor, open the `MCPServerConnection` **Connection tab** and use **Generate Token** to create it; use that value as the client's `Authorization: Bearer` token.
+- **Bearer token** — `bearerToken` in the `.properties` is blank, so `authMode=bearer` **fails closed** (every call `401`) until you set one. First **create a token** — a strong, random, high-entropy value:
+
+  ```bash
+  openssl rand -hex 32     # 64-char hex; this exact string is the shared secret
+  ```
+
+  (Or, in the Config Editor, click **Generate Token** on the `MCPServerConnection` **Connection tab** and copy the value it produces.) Then set it as `bearerToken=<value>` in [`examples/MCP_Server_Example.properties`](../examples/MCP_Server_Example.properties), and give the **same** value to every client as its `Authorization: Bearer <value>` header. Treat it like a password: don't commit a real one (the shipped file keeps it blank), and rotate by regenerating and updating both the property and each client. Note it lives in the properties file in **plaintext** — fine for a localhost demo; for a networked deployment prefer the connector's encrypted `bearerToken` field (`PASSWORD` syntax, auto-decrypted at runtime) or a vault.
 
 **3. Run the AssemblyLine as an MCP server.** From your VDI solution directory (or point `-c` at the repo copy), start the UC1 AssemblyLine with the VDI server runtime:
 
