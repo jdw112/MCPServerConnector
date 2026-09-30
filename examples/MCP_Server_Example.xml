@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?><MetamergeConfig IDIversion="Created by SDI10.0.0.5 - 2025-04-22" created="Thu Jun 18 19:21:16 CDT 2026" createdBy="jason" modified="Tue Sep 29 19:53:13 CDT 2026" modifiedBy="jason" version="7.1.1">
+<?xml version="1.0" encoding="UTF-8"?><MetamergeConfig IDIversion="Created by SDI10.0.0.5 - 2025-04-22" created="Thu Jun 18 19:21:16 CDT 2026" createdBy="jason" modified="Wed Sep 30 13:35:36 CDT 2026" modifiedBy="jason" version="7.1.1">
     <Folder name="AssemblyLines">
         
     <AssemblyLine name="MCP_Smoke_Test">
@@ -164,8 +164,14 @@ task.dumpEntry(work)]]></parameter>
             </InitParams>
         </AssemblyLine>
     <AssemblyLine name="MCPServer_LDAP">
-            <ModTime>1790729082009</ModTime>
-            <Settings/>
+            <ModTime>1790792685371</ModTime>
+            <Settings>
+                <parameter name="ALPoolSettingsDialog">false</parameter>
+                <parameter name="automapattributes">false</parameter>
+                <parameter name="createTombstones">false</parameter>
+                <parameter name="includeGlobalPrologs">true</parameter>
+                <parameter name="nullBehaviorDialog">showNullBehavior</parameter>
+            </Settings>
             <Hooks/>
             <CheckpointConfig/>
             <SandboxConfig/>
@@ -194,17 +200,18 @@ task.dumpEntry(work)]]></parameter>
             </SimulationConfig>
             <LogConfig/>
             <ContainerEF name="EntryFeedContainer">
-                <ModTime>1790716712390</ModTime>
+                <ModTime>1790771033622</ModTime>
                 <Connector name="MCPServerConnection">
                     <InheritFrom>system:/Connectors/MCPServerConnector</InheritFrom>
-                    <ModTime>1790716712390</ModTime>
+                    <ModTime>1790771033622</ModTime>
                     <ConnectorMode>Server</ConnectorMode>
                     <ConnectorState>Enabled</ConnectorState>
                     <Configuration>
+                        <UserComment></UserComment>
                         <InheritFrom>[parent]</InheritFrom>
-                        <ModTime>1790716712390</ModTime>
+                        <ModTime>1790771033622</ModTime>
                         <parameter name="allowedOrigins">https://good.example</parameter>
-                        <parameter encrypted="true" name="bearerToken"></parameter>
+                        <parameter name="bearerToken">@SUBSTITUTE{property.MCP_Server_Example:bearerToken}</parameter>
                         <parameter name="debug">false</parameter>
                         <parameter name="healthPath">/health</parameter>
                         <parameter name="toolCatalog"><![CDATA[[
@@ -278,12 +285,12 @@ task.dumpEntry(work)]]></parameter>
                 </Connector>
             </ContainerEF>
             <ContainerDF name="DataFlowContainer">
-                <ModTime>1790729082009</ModTime>
+                <ModTime>1790792658287</ModTime>
                 <Branch name="lookup_user">
-                    <ModTime>1790715244186</ModTime>
+                    <ModTime>1790792658287</ModTime>
                     <Connector name="LDAPLookup_User">
                         <InheritFrom>/Connectors/LDAPLookup</InheritFrom>
-                        <ModTime>1790715244186</ModTime>
+                        <ModTime>1790792658287</ModTime>
                         <ConnectorMode>Lookup</ConnectorMode>
                         <ConnectorState>Enabled</ConnectorState>
                         <Configuration>
@@ -470,7 +477,11 @@ work.setAttribute("$mcp.structured", "{\"found\":false}");]]></Script>
                         <PoolDefinition>
                             <InheritFrom>[parent]</InheritFrom>
                         </PoolDefinition>
-                        <PoolInstance/>
+                        <PoolInstance>
+                            <ModTime>1790792658287</ModTime>
+                            <Enabled>false</Enabled>
+                            <ExhaustedPoolBehavior>Wait</ExhaustedPoolBehavior>
+                        </PoolInstance>
                     </Connector>
                     <Conditions>
                         <ModTime>1790466124042</ModTime>
@@ -1438,7 +1449,11 @@ if (cur == null || cur == ""){
 }]]></parameter>
                 </Script>
             </ContainerDF>
-            <ThreadOptions/>
+            <ThreadOptions>
+                <parameter name="assemblyline.ehc.executeProlog">false</parameter>
+                <parameter name="assemblyline.ehc.maxInstance">5</parameter>
+                <parameter name="assemblyline.ehc.minPrepare">5</parameter>
+            </ThreadOptions>
             <Operations/>
             <InitParams>
                 <Schema name="AssemblyLineInitParams"/>
@@ -1448,7 +1463,7 @@ if (cur == null || cur == ""){
     <Folder name="Connectors">
         <Connector name="LDAPLookup">
             <InheritFrom>system:/Connectors/ibmdi.LDAP</InheritFrom>
-            <ModTime>1790729286773</ModTime>
+            <ModTime>1790792645910</ModTime>
             <ConnectorMode>Lookup</ConnectorMode>
             <ConnectorState>Enabled</ConnectorState>
             <Configuration>
@@ -1498,11 +1513,11 @@ if (cur == null || cur == ""){
             <Operations/>
             <PoolDefinition>
                 <InheritFrom>[parent]</InheritFrom>
-                <ModTime>1790437130630</ModTime>
-                <Enabled>false</Enabled>
-                <MinPoolSize>0</MinPoolSize>
-                <MaxPoolSize>0</MaxPoolSize>
-                <PurgeInterval>0</PurgeInterval>
+                <ModTime>1790792645910</ModTime>
+                <Enabled>true</Enabled>
+                <MinPoolSize>20</MinPoolSize>
+                <MaxPoolSize>20</MaxPoolSize>
+                <PurgeInterval>60</PurgeInterval>
                 <InitializeAttempts>1</InitializeAttempts>
                 <InitializeSleepInterval>0</InitializeSleepInterval>
             </PoolDefinition>
