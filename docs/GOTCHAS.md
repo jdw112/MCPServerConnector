@@ -52,7 +52,13 @@ The available form-script API (the `form` object) includes `getConfigValue`/`set
 
 ## 7. Real MCP clients send an `Origin` header
 
-Browsers *and* Claude's MCP client send `Origin`. If `allowedOrigins` is non-empty and doesn't include the client's origin, the connection gets `403`. Leave `allowedOrigins` empty for local testing unless you know the exact value (check the AL log for the parsed `Origin` header). curl/MCP Inspector typically send no `Origin`, so they're unaffected — which can mask the issue until a real client connects.
+Browsers always attach `Origin` on cross-origin requests and **cannot forge or omit it** (`Origin` is a [forbidden header name](https://fetch.spec.whatwg.org/#forbidden-header-name)). Non-browser MCP clients — curl, MCP Inspector, the MCP SDKs, and Claude Code's `fetch()`-based transport — send **no** usable `Origin` (and can't be made to via `--header`, which is silently dropped for forbidden headers).
+
+The connector uses this asymmetry: with `allowedOrigins` non-empty, a **present** `Origin` not on the list gets `403` (this is the DNS-rebinding defense — the attacker is a browser page whose real `Origin` won't match), while a **missing** `Origin` is **allowed through** (bearer/mTLS is the boundary for those callers). See [CONFIGURE.md §4](CONFIGURE.md). Consequences:
+
+- Requiring `Origin` would lock out exactly the legitimate non-browser clients while adding nothing against the browser attacker — so don't.
+- A `403` from a real client means its `Origin` isn't on your list, **not** that the client is broken. Read the AL log for the actual `Origin` value it sent and add that; don't reach for a code change.
+- For local/dev testing, leave `allowedOrigins` empty (check OFF).
 
 ---
 

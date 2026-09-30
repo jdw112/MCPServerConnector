@@ -12,8 +12,10 @@
 #   ENDPOINT  MCP endpoint path                   (default /mcp)
 #   HEALTH    health-check path                   (default /health)
 #   TOKEN     bearer token value (the value only, NOT "bearerToken=...")
-#   ORIGIN    an allowed Origin; required once the connector has an
-#             allowedOrigins allowlist configured (default https://good.example)
+#   ORIGIN    Origin header sent on the happy-path cases. When allowedOrigins is
+#             set it must be one of the allowed values (a present-but-unlisted
+#             Origin is rejected 403; a *missing* Origin is allowed through — see
+#             case 10b and CONFIGURE.md §4). Default https://good.example
 #   PROTO     MCP protocol version to send        (default 2025-06-18)
 #   USERID    a seeded uid the happy-path tool cases look up (default alice)
 #
@@ -108,7 +110,7 @@ check "9  wrong endpointPath -> 404"       404 '' -- -X POST "$BASE/nope-not-a-p
   -d "$(rpc 7 tools/list '')"
 check "10 disallowed Origin -> 403"        403 '' -- -X POST "$URL" -H "$CT" -H "$AUTH" -H "Origin: https://evil.example" \
   -d "$(rpc 8 tools/list '')"
-check "10b missing Origin -> 403"          403 '' -- -X POST "$URL" -H "$CT" -H "$AUTH" \
+check "10b missing Origin allowed -> 200"  200 '"tools"' -- -X POST "$URL" -H "$CT" -H "$AUTH" \
   -d "$(rpc 81 tools/list '')"
 check "11 unknown tool -> isError"         200 '"isError":true' -- -X POST "$URL" -H "$CT" -H "$AUTH" -H "$ORI" \
   -d '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"does_not_exist","arguments":{}}}'

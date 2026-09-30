@@ -33,6 +33,37 @@ A prebuilt jar is checked in at [`dist/mcp-server-connector.jar`](dist/mcp-serve
 
 Copy the jar (`dist/mcp-server-connector.jar`, or `target/mcp-server-connector.jar` if you built it) to `VDI_install_dir/jars/connectors/`, restart the Config Editor / server, and the `MCPServerConnector` connector appears under Connectors. See [docs/CONFIGURE.md](docs/CONFIGURE.md) to build the AssemblyLine and connect a client.
 
+## Testing
+
+Test with `curl` before pointing any MCP client at it — it isolates connector behavior from client-specific transport quirks.
+
+```bash
+# tools/list (no auth)
+curl -s -X POST http://127.0.0.1:8443/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+# tools/call
+curl -s -X POST http://127.0.0.1:8443/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"<tool>","arguments":{}}}'
+```
+
+If `authMode=bearer`, add `-H 'Authorization: Bearer <token>'` (the raw token value only, not `bearerToken=<token>`).
+
+**If `allowedOrigins` is configured, expect `403 {"error":"Origin not allowed."}` from the commands above** — curl sends no `Origin` header by default, and a non-empty allowlist rejects that outright (see [docs/GOTCHAS.md §7](docs/GOTCHAS.md)). To test that path specifically, add a matching header:
+
+```bash
+curl -s -X POST http://127.0.0.1:8443/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Origin: <one-of-your-allowedOrigins-values>' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/list"}'
+```
+
+For local/dev testing where you don't know or don't care what `Origin` a client will send, leave `allowedOrigins` empty — this disables the check entirely rather than failing closed against a value you can't predict. Real MCP clients, including Claude's, *do* send `Origin`, so don't assume a `403` here means the client is broken — check the AL log for the actual `Origin` value the client sent and match your allowlist to that, rather than reaching for a code change.
+
+Full curl walkthrough (`initialize`, troubleshooting table) is in [docs/CONFIGURE.md §5](docs/CONFIGURE.md). [MCP Inspector](https://github.com/modelcontextprotocol/inspector) works too — point it at the same URL.
+
 ## Quick connect (Claude Code)
 
 ```
@@ -40,7 +71,7 @@ claude mcp add --transport http vdi-mcp http://127.0.0.1:8443/mcp \
   --header "Authorization: Bearer <your-token>"
 ```
 
-Start a fresh Claude Code session (tools register at session start), then ask it to use one of your configured tools.
+Start a fresh Claude Code session (tools register at session start), then ask it to use one of your configured tools. Note: `--header "Origin: ..."` does **not** work here — `Origin` is a forbidden header name for `fetch()`-based clients and gets silently dropped; if `allowedOrigins` is set, it must match whatever `Origin` Claude Code actually sends on its own, not a value you inject via `--header`.
 
 ## License
 

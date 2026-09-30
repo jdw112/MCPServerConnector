@@ -42,7 +42,7 @@ Security section (Authentication Mode, Bearer Token, Allowed Origins, Use SSL, R
 
 - **`authMode: mtls`** does nothing extra in the connector's own Java logic — mutual TLS is enforced entirely by the inherited `HTTPServerConnector` SSL layer. Set **`Use SSL = true`** and **`Require Client Certificate = true`**; client-certificate verification then happens during the TLS handshake, before any connector code runs. See [§3a. Configuring mTLS](#3a-configuring-mtls) below — the keystore/truststore come from the **SDI server**, not from connector fields.
 - **`authMode: none`** performs no authentication check at all.
-- **Allowed Origins**: origin checking is OFF when this is empty (out-of-box, curl, non-browser clients). **Once you set an allowlist, the `Origin` header becomes strictly required** — a request with a missing or non-matching `Origin` gets `403`. (This closes a bypass where omitting the header would skip the check; it also means curl must then send `-H 'Origin: <allowed>'`.) Set this for any networked deployment.
+- **Allowed Origins**: origin checking is OFF when this is empty (out-of-box, curl, non-browser clients). **Once you set an allowlist, a _present_ `Origin` header is validated strictly** — a request whose `Origin` isn't on the list gets `403`. A **missing** `Origin` is **allowed through** (it then relies on bearer/mTLS as the auth boundary). This is deliberate and is what DNS-rebinding protection actually requires: the threat is a browser page, and browsers *always* attach `Origin` on cross-origin requests and cannot forge or omit it (`Origin` is a [forbidden header name](https://fetch.spec.whatwg.org/#forbidden-header-name)) — so a rebinding attacker's request carries a non-matching `Origin` and is rejected, while legitimate non-browser MCP clients (curl, SDKs, Claude Code's `fetch()` transport) send no `Origin` and must not be locked out. Set an allowlist for any browser-facing or networked deployment; pair it with `bindAddress`, bearer auth, and TLS.
 
 ## 3a. Configuring mTLS
 
@@ -135,7 +135,7 @@ To run the whole acceptance matrix (SPEC.md §9) in one shot — happy path plus
 TOKEN=<bearer-token> ORIGIN=https://good.example ./scripts/revalidate.sh
 ```
 
-Configurable via environment: `BASE`, `ENDPOINT`, `HEALTH`, `TOKEN`, `ORIGIN`, `PROTO`. `ORIGIN` must be an allowed origin once `allowedOrigins` is set (see §4), otherwise every case `403`s. Pass `--log` to tail the server log after the run (`LOGFILE` overrides the default path); `-h` prints usage.
+Configurable via environment: `BASE`, `ENDPOINT`, `HEALTH`, `TOKEN`, `ORIGIN`, `PROTO`, `USERID`. When `allowedOrigins` is set, `ORIGIN` must be one of the allowed values — the happy-path cases send it, so a wrong value `403`s them (a *missing* Origin is allowed; see §4 and case 10b). Pass `--log` to tail the server log after the run (`LOGFILE` overrides the default path); `-h` prints usage.
 
 ### Troubleshooting
 

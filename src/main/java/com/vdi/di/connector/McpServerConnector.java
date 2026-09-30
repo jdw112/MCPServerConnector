@@ -323,12 +323,27 @@ public class McpServerConnector extends HTTPServerConnector {
      * §2/§6: validate Origin against allowedOrigins.
      *
      * If allowedOrigins is empty, Origin checking is OFF (out-of-box / curl /
-     * non-browser clients). But once an allowlist IS configured, the Origin
-     * header is STRICTLY REQUIRED: a missing Origin is rejected (403), not
-     * allowed through. Otherwise an attacker could bypass the allowlist simply
-     * by omitting the header — which made the allowlist useless against
-     * non-browser clients. So: configure allowedOrigins to enforce origins;
-     * clients (incl. curl) must then send a matching Origin header.
+     * non-browser clients).
+     *
+     * Once an allowlist IS configured: a PRESENT Origin header is validated
+     * strictly against it (reject on any mismatch) — this is what actually
+     * defends against DNS-rebinding, since a browser (including a rebound one)
+     * always attaches Origin on cross-origin requests and cannot forge it to
+     * an arbitrary value. A MISSING Origin header is allowed through: per the
+     * Fetch spec, "Origin" is a forbidden header name, so browser-based
+     * fetch()/XHR clients can never omit it, but non-browser HTTP clients
+     * (curl, MCP SDKs, Claude Code's fetch()-based transport) send no Origin
+     * at all in normal operation and structurally cannot be made to send one
+     * that would pass an allowlist. Rejecting missing-Origin requests would
+     * make the allowlist impossible for exactly the legitimate MCP clients
+     * this server exists to serve, while doing nothing extra against browser
+     * attackers (who can't omit the header anyway). The bearer-token check
+     * remains the real auth boundary for these no-Origin callers.
+     *
+     * Deliberately NOT based on peer/remote address: a DNS-rebinding attack
+     * against a loopback-bound server arrives via a loopback peer connection
+     * too (the victim's own browser, on the same host), so peer IP cannot
+     * distinguish an attacker from a legitimate local client.
      */
     private boolean isOriginAllowed(Entry httpEntry) {
         String allowed = getParam("allowedOrigins");
@@ -337,7 +352,7 @@ public class McpServerConnector extends HTTPServerConnector {
         }
         String origin = getHeader(httpEntry, "Origin");
         if (origin == null) {
-            return false;
+            return true;
         }
         for (String candidate : allowed.split(",")) {
             if (candidate.trim().equalsIgnoreCase(origin.trim())) {
