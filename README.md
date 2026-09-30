@@ -1,6 +1,12 @@
 # MCP Server Connector for IBM VDI 10
 
-A custom IBM Verify Directory Integrator (VDI 10) **Server-mode connector** that turns an AssemblyLine into an **MCP (Model Context Protocol) server** over Streamable HTTP. When the AL runs, it *is* an MCP server: an inbound `tools/call` becomes the AL's work Entry, and the AL's reply Entry becomes the tool result. Validated end-to-end with **Claude Code as a live MCP client**.
+A custom IBM Verify Directory Integrator (VDI 10) **Server-mode connector** that turns an AssemblyLine into an **MCP (Model Context Protocol) server** over Streamable HTTP. When the AL runs, it *is* an MCP server: an inbound `tools/call` becomes the AL's work Entry, and the AL's reply Entry becomes the tool result.
+
+**Validation status:** proven three ways — a curl transport/security matrix (14/14, [`scripts/revalidate.sh`](scripts/revalidate.sh)), a **live Claude Code MCP client** answering natural-language questions end-to-end, and a **clean-clone run** of the bundled example (`git clone` → `docker compose up` → set two secrets → `ibmdisrv`), which reproduced the full working demo — all five tools returning correct directory data plus the security matrix. See the runnable example below.
+
+## Runnable example — UC1 Identity Service Desk
+
+A complete, reproducible demo ships in the repo: a VDI solution ([`examples/`](examples)) exposing five read-only identity tools (`lookup_user`, `get_user_groups`, `list_group_members`, `search_users`, `get_user_overview`), backed by a containerized OpenLDAP ([`docker/`](docker)) seeded with users and groups. The example is committed **without secrets** — you set `ldapAdminPwd` and a generated `bearerToken` locally. Full walkthrough in [docs/USE-CASES.md §3](docs/USE-CASES.md); the design rationale and enterprise use cases are in that doc's other sections. **Clean-clone verified:** a fresh checkout plus the two secret fill-ins runs green end-to-end.
 
 ## How it works
 
@@ -51,16 +57,17 @@ curl -s -X POST http://127.0.0.1:8443/mcp \
 
 If `authMode=bearer`, add `-H 'Authorization: Bearer <token>'` (the raw token value only, not `bearerToken=<token>`).
 
-**If `allowedOrigins` is configured, expect `403 {"error":"Origin not allowed."}` from the commands above** — curl sends no `Origin` header by default, and a non-empty allowlist rejects that outright (see [docs/GOTCHAS.md §7](docs/GOTCHAS.md)). To test that path specifically, add a matching header:
+**Origin handling** (with `allowedOrigins` set): a **present** `Origin` not on the list gets `403 {"error":"Origin not allowed."}`; a **missing** `Origin` — which curl and non-browser MCP clients send by default — is **allowed through** (see [docs/GOTCHAS.md §7](docs/GOTCHAS.md)). So the commands above still work even with an allowlist configured. This is deliberate: the DNS-rebinding threat is a browser, which *always* attaches `Origin` and can't omit it, so a strict present-Origin check defends against it without locking out the SDK/curl clients that send none. To exercise the reject path, send a **disallowed** `Origin`:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8443/mcp \
   -H 'Content-Type: application/json' \
-  -H 'Origin: <one-of-your-allowedOrigins-values>' \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/list"}'
+  -H 'Authorization: Bearer <token>' \
+  -H 'Origin: https://evil.example' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/list"}'     # -> 403
 ```
 
-For local/dev testing where you don't know or don't care what `Origin` a client will send, leave `allowedOrigins` empty — this disables the check entirely rather than failing closed against a value you can't predict. Real MCP clients, including Claude's, *do* send `Origin`, so don't assume a `403` here means the client is broken — check the AL log for the actual `Origin` value the client sent and match your allowlist to that, rather than reaching for a code change.
+For local/dev, leave `allowedOrigins` empty (check off entirely). A real MCP client hitting `403` almost never means the client is broken over `Origin` — its `fetch()` transport sends none, which passes — so check the token and `endpointPath` first.
 
 Full curl walkthrough (`initialize`, troubleshooting table) is in [docs/CONFIGURE.md §5](docs/CONFIGURE.md). [MCP Inspector](https://github.com/modelcontextprotocol/inspector) works too — point it at the same URL.
 
