@@ -42,7 +42,7 @@ Security section (Authentication Mode, Bearer Token, Allowed Origins, Use SSL, R
 
 - **`authMode: mtls`** does nothing extra in the connector's own Java logic — mutual TLS is enforced entirely by the inherited `HTTPServerConnector` SSL layer. Set **`Use SSL = true`** and **`Require Client Certificate = true`**; client-certificate verification then happens during the TLS handshake, before any connector code runs. See [§3a. Configuring mTLS](#3a-configuring-mtls) below — the keystore/truststore come from the **SDI server**, not from connector fields.
 - **`authMode: none`** performs no authentication check at all.
-- **Allowed Origins**: origin checking is OFF when this is empty (out-of-box, curl, non-browser clients). **Once you set an allowlist, the `Origin` header becomes strictly required** — a request with a missing or non-matching `Origin` gets `403`. (This closes a bypass where omitting the header would skip the check; it also means curl must then send `-H 'Origin: <allowed>'`.) Set this for any networked deployment.
+- **Allowed Origins**: origin checking is OFF when this is empty (out-of-box, curl, non-browser clients). **Once you set an allowlist, a _present_ `Origin` header is validated strictly** — a request whose `Origin` isn't on the list gets `403`. A **missing** `Origin` is **allowed through** (it then relies on bearer/mTLS as the auth boundary). This is deliberate and is what DNS-rebinding protection actually requires: the threat is a browser page, and browsers *always* attach `Origin` on cross-origin requests and cannot forge or omit it (`Origin` is a [forbidden header name](https://fetch.spec.whatwg.org/#forbidden-header-name)) — so a rebinding attacker's request carries a non-matching `Origin` and is rejected, while legitimate non-browser MCP clients (curl, SDKs, Claude Code's `fetch()` transport) send no `Origin` and must not be locked out. Set an allowlist for any browser-facing or networked deployment; pair it with `bindAddress`, bearer auth, and TLS.
 
 ## 3a. Configuring mTLS
 
@@ -127,6 +127,16 @@ curl -s -X POST http://127.0.0.1:8443/mcp \
 
 Or point the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) at `http://127.0.0.1:<tcpPort><endpointPath>`.
 
+### Full revalidation matrix
+
+To run the whole acceptance matrix (SPEC.md §9) in one shot — happy path plus every documented error branch (`401`/`400`/`403`/`404`/`405`/`202`, unknown-tool `isError`) — use [`scripts/revalidate.sh`](../scripts/revalidate.sh). It prints pass/fail per case and exits non-zero if any fail, so it doubles as a pre-deploy gate.
+
+```bash
+TOKEN=<bearer-token> ORIGIN=https://good.example ./scripts/revalidate.sh
+```
+
+Configurable via environment: `BASE`, `ENDPOINT`, `HEALTH`, `TOKEN`, `ORIGIN`, `PROTO`, `USERID`. When `allowedOrigins` is set, `ORIGIN` must be one of the allowed values — the happy-path cases send it, so a wrong value `403`s them (a *missing* Origin is allowed; see §4 and case 10b). Pass `--log` to tail the server log after the run (`LOGFILE` overrides the default path); `-h` prints usage.
+
 ### Troubleshooting
 
 - **Every request 401s even with the right-looking token** → the Bearer Token field almost certainly contains the wrong value. Most common cause: it holds `bearerToken=test123` (the whole pair) instead of `test123` (see §3). Clear the field to empty and retype just the token. Remember a TDI password field can append rather than replace on edit.
@@ -160,9 +170,30 @@ Add a custom connector pointing at the endpoint URL (Settings → Connectors →
 - If `authMode=bearer`, the client is configured with the exact token value (just the value — see §3).
 - The URL path the client uses matches `endpointPath` exactly (else `404`).
 - Reaching the host on a non-localhost interface? `bindAddress` must allow it, and you need TLS + auth (don't expose plaintext bearer off localhost).
-- **`Allowed Origins`: leave it empty unless you know the client's `Origin`.** Real MCP clients (including Claude) send an `Origin` header. If you've populated `Allowed Origins`, a client whose `Origin` isn't on the list gets `403` and the connection fails. To find what a client actually sends, check the AL log for the parsed `Origin` header on an incoming request, then add that exact value. When in doubt for local testing, clear the field (empty = allow any).
+- **`Allowed Origins`:** a *present* `Origin` not on the list gets `403`; a *missing* `Origin` is allowed through (§4). Claude Code's `fetch()` transport and other non-browser clients send **no** usable `Origin`, so an allowlist does **not** block them — leave it set or empty as your deployment needs. A real MCP client failing here is almost never `Origin` (it sends none); check the token and `endpointPath` first. If a browser-based client *is* getting `403`, read the AL log for the `Origin` it actually sent and add that exact value.
 
 > Note: a `tools/call` from a real client needs `serverReply=true` on the connector config (set by default in this connector's `tdi.xml`). Without it, `initialize`/`tools/list` work but tool calls hang with no response — see [SPEC.md](SPEC.md) §1d. If you cloned/edited the connector config and tool calls hang, verify that parameter is present.
+
+### Verify from Claude (end-to-end)
+
+The curl matrix ([`scripts/revalidate.sh`](../scripts/revalidate.sh)) proves the transport and security gates, but the path that actually matters is an **AI client discovering and calling the tools**. Do this once against a running `MCPServer_LDAP` with your real catalog — it's the [§9 acceptance](SPEC.md#9-acceptance--validation) criterion.
+
+1. **Server ready.** `curl -s http://127.0.0.1:8443/health` → `{"status":"ok"}`, and a `tools/list` (see §5) shows your tool names — not `[]`.
+2. **Register it in Claude Code with the _current_ token.** The header token must equal the connector's `bearerToken` exactly; if you regenerated it, re-add:
+   ```bash
+   claude mcp remove vdi 2>/dev/null
+   claude mcp add --transport http vdi http://127.0.0.1:8443/mcp \
+     --header "Authorization: Bearer <current-token>"
+   ```
+   Do **not** add `--header "Origin: ..."` — `Origin` is a forbidden header for `fetch()` clients and is silently dropped. With this connector a missing `Origin` is allowed, so `allowedOrigins` can stay set.
+3. **Start a fresh Claude Code session** — tools register at startup. `/mcp` should show `vdi` connected, and the tools (`lookup_user`, `get_user_groups`, …) should be listed.
+4. **Ask in natural language**, e.g. *"Look up alice and list her groups."* Claude should call `lookup_user` and `get_user_groups` and answer from the returned `structuredContent`.
+5. **Confirm in the AL log** the incoming `tools/call`, the branch taken, and the reply — proof the connector served it, not a model guess.
+
+Troubleshooting:
+- **`/mcp` shows an auth failure / 401** → the configured header token doesn't match the connector's `bearerToken` (common right after a regenerate). Re-add with the current value.
+- **Tools don't appear** → the session wasn't restarted, or the catalog is empty (re-run the step-1 `tools/list`).
+- **A tool call hangs or returns "no result"** → `serverReply` / the reply Output map — see the note above and [GOTCHAS.md](GOTCHAS.md) §3 and §9.
 
 ### Interop points to watch (v1 design choices, per [SPEC.md](SPEC.md) §2)
 
