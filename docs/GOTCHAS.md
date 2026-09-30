@@ -158,3 +158,13 @@ work.removeAttribute("gcn");                                // ...and clean the 
 Two ways this bites while wiring it: the accumulate still reading the old name (`cn`) so `groups` never builds, and the cleanup deleting the **wrong** attribute (`cn` instead of `gcn`) so the user's name vanishes while the scratch leaks. Rule of thumb: the loop touches only names nothing else uses, and cleans up exactly those.
 
 **Symptom if broken:** an attribute the profile set is missing from the result, or shows the *last* iterated value; a scratch attribute (`gcn`) leaks into `structuredContent`.
+
+## 17. One request per connection — send `Connection: close` or real clients `ECONNRESET`
+
+The inherited `HTTPServerConnector` server model is **one request per TCP connection**: `getNextClient()` accepts a socket, a per-connection instance runs a single `getNextEntry()`/`replyEntry()` cycle, and the socket is closed (`CTGDJP314I Client connection closed`). But the response is `HTTP/1.1 200 OK` with a `Content-Length` and — by default — **no `Connection` header**, which under HTTP/1.1 means **keep-alive**. So the client is told the connection is reusable, then the server closes it anyway.
+
+A client that honors keep-alive and pipelines its messages on one connection — which the **MCP SDK's `undici`/`fetch` transport does** for the `initialize` → `notifications/initialized` → `tools/list` handshake — sends its second message onto the just-closed socket → **`ECONNRESET`**, and the handshake fails. **curl hides this**: on connection reuse it silently retries the failed request on a fresh socket, so single-request curl and even `curl --next` "work", while the real AI client cannot connect. (Same family of trap as §3 and §5 — curl-green, client-broken.)
+
+Fix: set **`Connection: close`** on every response (`reply.setAttribute("http.Connection", "close")` in the reply builders — the HTTP parser emits `http.<Name>` attributes as response headers). The client then opens a fresh connection per message, which is exactly what MCP's stateless Streamable HTTP transport is designed for. Supporting true keep-alive instead would mean overriding the connection loop to read multiple requests off one socket and manage HTTP/1.1 persistence yourself — large, against the framework, and unnecessary for MCP's message rate.
+
+**Symptom if broken:** `claude mcp` / any `undici`/`fetch` client reports `ECONNRESET` "socket closed unexpectedly" during connect; `curl` single requests pass but `curl -v --next … --next …` shows `Re-using existing connection` then `Recv failure: Connection reset by peer` on the second request.

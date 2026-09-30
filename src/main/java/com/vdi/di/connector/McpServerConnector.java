@@ -720,6 +720,7 @@ public class McpServerConnector extends HTTPServerConnector {
         reply.setAttribute(ATTR_NAME_HTTP_BODY, "");
         reply.setAttribute(ATTR_NAME_HTTP_CONTENT_TYPE, CONTENT_TYPE_JSON);
         reply.setAttribute("http.status", HTTP_ACCEPTED);
+        reply.setAttribute("http.Connection", "close");   // one-request-per-connection; see buildHttpReplyEntry
         super.replyEntry(reply);
     }
 
@@ -741,6 +742,14 @@ public class McpServerConnector extends HTTPServerConnector {
         reply.setAttribute(ATTR_NAME_HTTP_BODY, body.serialize());
         reply.setAttribute(ATTR_NAME_HTTP_CONTENT_TYPE, CONTENT_TYPE_JSON);
         reply.setAttribute("http.status", status);
+        // This connector serves exactly one request per TCP connection and closes the
+        // socket after replying. Without "Connection: close" the HTTP/1.1 default is
+        // keep-alive, so a client (e.g. the MCP SDK's undici/fetch transport) reuses
+        // the connection for its next message (initialize -> notifications/initialized
+        // -> tools/list) and that write hits the already-closed socket -> ECONNRESET,
+        // failing the handshake. curl masks it by silently retrying on a fresh socket.
+        // Advertising close makes the client open a new connection per message.
+        reply.setAttribute("http.Connection", "close");
         return reply;
     }
 
