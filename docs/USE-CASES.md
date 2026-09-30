@@ -131,9 +131,9 @@ Faster mean-time-to-resolution; agents need no standing read access to source sy
 
 ### Running the demo (Docker OpenLDAP)
 
-A self-contained, reproducible instance of this use case ships in the repo, backed by a containerized OpenLDAP rather than AD/IVIG. The tool catalog above is the conceptual AD version; the runnable demo is adapted to OpenLDAP's schema (`inetOrgPerson` + `groupOfNames`, keyed on `uid`) and exposes five read-only tools: `lookup_user`, `get_user_groups`, `list_group_members`, `search_users`, and `get_user_overview` (a composite that returns profile **and** memberships in one call).
+A self-contained, reproducible instance of this use case ships in the repo, backed by a containerized OpenLDAP rather than AD/IVIG. The solution config and its externalized properties are in [`examples/`](../examples) (`MCP_Server_Example.xml`, `MCP_Server_Example.properties`). The tool catalog above is the conceptual AD version; the runnable demo is adapted to OpenLDAP's schema (`inetOrgPerson` + `groupOfNames`, keyed on `uid`) and exposes five read-only tools: `lookup_user`, `get_user_groups`, `list_group_members`, `search_users`, and `get_user_overview` (a composite that returns profile **and** memberships in one call).
 
-**1. Start the directory.** From [`docker/`](../docker), bring up OpenLDAP (`osixia/openldap`, domain `example.com`). [`seed.ldif`](../docker/seed.ldif) loads on first init — 5 users and 3 groups with overlapping membership and a `manager` hierarchy:
+**1. Start the directory.** From [`docker/`](../docker), bring up OpenLDAP (`osixia/openldap`, domain `example.com`). [`seed.ldif`](../docker/seed.ldif) loads on first init — 5 users and 3 groups with overlapping membership and a `manager` hierarchy. The LDAP admin password is set by `LDAP_ADMIN_PASSWORD` in [`docker-compose.yml`](../docker/docker-compose.yml) — note the value you use; step 2 must match it.
 
 ```bash
 cd docker && docker compose up -d
@@ -141,15 +141,20 @@ cd docker && docker compose up -d
 
 The custom LDIF loads only into a fresh data volume. To re-seed after editing it: `docker compose down -v && docker compose up -d`.
 
-**2. Run the AssemblyLine as an MCP server.** From the VDI solution directory, start the specific UC1 AssemblyLine with the VDI server runtime:
+**2. Set the secrets (shipped blank).** The example is committed **without** credentials, so two things must be set before it will serve:
+
+- **LDAP bind password** — set `ldapAdminPwd` in [`examples/MCP_Server_Example.properties`](../examples/MCP_Server_Example.properties) to the **same value** as `LDAP_ADMIN_PASSWORD` in `docker-compose.yml`. (The connector's `ldapPassword` resolves from this property.) `ldapAdminDN` defaults to the OpenLDAP admin DN, e.g. `cn=admin,dc=example,dc=com`.
+- **Bearer token** — the exported `bearerToken` is blank, so `authMode=bearer` **fails closed** (every call `401`) until you set one. In the Config Editor, open the `MCPServerConnection` **Connection tab** and use **Generate Token** to create it; use that value as the client's `Authorization: Bearer` token.
+
+**3. Run the AssemblyLine as an MCP server.** From your VDI solution directory (or point `-c` at the repo copy), start the UC1 AssemblyLine with the VDI server runtime:
 
 ```bash
-ibmdisrv -c MCP_Server_Example.xml -r MCPServer_LDAP
+ibmdisrv -c examples/MCP_Server_Example.xml -r MCPServer_LDAP
 ```
 
-`-c` loads the solution config; `-r` runs the `MCPServer_LDAP` AssemblyLine, which *is* the MCP server. It listens (per its connector config) at `http://127.0.0.1:8443/mcp`, with an unauthenticated health probe at `/health`.
+`-c` loads the solution config (which also contains the `MCP_Smoke_Test` AL for a bare echo/`server_time` check); `-r` runs the `MCPServer_LDAP` AssemblyLine, which *is* the MCP server. It listens (per its connector config) at `http://127.0.0.1:8443/mcp`, with an unauthenticated health probe at `/health`.
 
-**3. Call a tool.** With `authMode=bearer` and an `Origin` allow-list configured, a lookup looks like:
+**4. Call a tool.** With `authMode=bearer` and an `Origin` allow-list configured, a lookup looks like (use the token from step 2):
 
 ```bash
 curl -s -X POST http://127.0.0.1:8443/mcp \
