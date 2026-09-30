@@ -221,7 +221,33 @@ public class McpServerConnector extends HTTPServerConnector {
             return true;
         }
         InetAddress local = socket.getLocalAddress();
-        return local != null && bindAddr.trim().equals(local.getHostAddress());
+        if (local == null) {
+            return false;
+        }
+        bindAddr = bindAddr.trim();
+        // Fast path: exact textual match (preserves prior behavior).
+        if (bindAddr.equals(local.getHostAddress())) {
+            return true;
+        }
+        // Address-aware match. A loopback bindAddress (e.g. 127.0.0.1) must accept
+        // ANY loopback peer — IPv4 127.0.0.1, IPv6 ::1, and IPv4-mapped
+        // ::ffff:127.0.0.1 are all "localhost". Modern clients resolve `localhost`
+        // to ::1 first (macOS/Node), so a strict 127.0.0.1 string match would
+        // reset every IPv6 loopback connection (ECONNRESET) — which locks out real
+        // MCP clients while curl-to-127.0.0.1 keeps working. Non-loopback binds
+        // still require an exact resolved-address match, preserving NIC isolation.
+        try {
+            InetAddress want = InetAddress.getByName(bindAddr);
+            if (want.equals(local)) {
+                return true;
+            }
+            if (want.isLoopbackAddress() && local.isLoopbackAddress()) {
+                return true;
+            }
+        } catch (Exception e) {
+            // Unresolvable bindAddress → fall through to reject.
+        }
+        return false;
     }
 
     /**
