@@ -170,9 +170,30 @@ Add a custom connector pointing at the endpoint URL (Settings → Connectors →
 - If `authMode=bearer`, the client is configured with the exact token value (just the value — see §3).
 - The URL path the client uses matches `endpointPath` exactly (else `404`).
 - Reaching the host on a non-localhost interface? `bindAddress` must allow it, and you need TLS + auth (don't expose plaintext bearer off localhost).
-- **`Allowed Origins`: leave it empty unless you know the client's `Origin`.** Real MCP clients (including Claude) send an `Origin` header. If you've populated `Allowed Origins`, a client whose `Origin` isn't on the list gets `403` and the connection fails. To find what a client actually sends, check the AL log for the parsed `Origin` header on an incoming request, then add that exact value. When in doubt for local testing, clear the field (empty = allow any).
+- **`Allowed Origins`:** a *present* `Origin` not on the list gets `403`; a *missing* `Origin` is allowed through (§4). Claude Code's `fetch()` transport and other non-browser clients send **no** usable `Origin`, so an allowlist does **not** block them — leave it set or empty as your deployment needs. A real MCP client failing here is almost never `Origin` (it sends none); check the token and `endpointPath` first. If a browser-based client *is* getting `403`, read the AL log for the `Origin` it actually sent and add that exact value.
 
 > Note: a `tools/call` from a real client needs `serverReply=true` on the connector config (set by default in this connector's `tdi.xml`). Without it, `initialize`/`tools/list` work but tool calls hang with no response — see [SPEC.md](SPEC.md) §1d. If you cloned/edited the connector config and tool calls hang, verify that parameter is present.
+
+### Verify from Claude (end-to-end)
+
+The curl matrix ([`scripts/revalidate.sh`](../scripts/revalidate.sh)) proves the transport and security gates, but the path that actually matters is an **AI client discovering and calling the tools**. Do this once against a running `MCPServer_LDAP` with your real catalog — it's the [§9 acceptance](SPEC.md#9-acceptance--validation) criterion.
+
+1. **Server ready.** `curl -s http://127.0.0.1:8443/health` → `{"status":"ok"}`, and a `tools/list` (see §5) shows your tool names — not `[]`.
+2. **Register it in Claude Code with the _current_ token.** The header token must equal the connector's `bearerToken` exactly; if you regenerated it, re-add:
+   ```bash
+   claude mcp remove vdi 2>/dev/null
+   claude mcp add --transport http vdi http://127.0.0.1:8443/mcp \
+     --header "Authorization: Bearer <current-token>"
+   ```
+   Do **not** add `--header "Origin: ..."` — `Origin` is a forbidden header for `fetch()` clients and is silently dropped. With this connector a missing `Origin` is allowed, so `allowedOrigins` can stay set.
+3. **Start a fresh Claude Code session** — tools register at startup. `/mcp` should show `vdi` connected, and the tools (`lookup_user`, `get_user_groups`, …) should be listed.
+4. **Ask in natural language**, e.g. *"Look up alice and list her groups."* Claude should call `lookup_user` and `get_user_groups` and answer from the returned `structuredContent`.
+5. **Confirm in the AL log** the incoming `tools/call`, the branch taken, and the reply — proof the connector served it, not a model guess.
+
+Troubleshooting:
+- **`/mcp` shows an auth failure / 401** → the configured header token doesn't match the connector's `bearerToken` (common right after a regenerate). Re-add with the current value.
+- **Tools don't appear** → the session wasn't restarted, or the catalog is empty (re-run the step-1 `tools/list`).
+- **A tool call hangs or returns "no result"** → `serverReply` / the reply Output map — see the note above and [GOTCHAS.md](GOTCHAS.md) §3 and §9.
 
 ### Interop points to watch (v1 design choices, per [SPEC.md](SPEC.md) §2)
 
