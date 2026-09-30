@@ -115,7 +115,9 @@ Three things that each silently break this:
 
 Also **balance the filter string** — a stray quote/paren gives `InvalidSearchFilterException: Unbalanced parenthesis` (search fails, cycle aborts, `HTTP 000`) or a `Lexical error … <EOF>` that fails init. Build it as `"(&(objectClass=…)(member=uid=" + uid + "," + base + "))"` and count the parens.
 
-**Symptom if broken:** AL log shows `search filter '(...member=uid=$userId,...)'` verbatim, or the hook-set filter never appears at all (no `CTGDJQ017I` line); `Loop Cycles:0`.
+**This is also what makes connector pooling safe.** With `serverConnector` + `LDAPConnector` pooling on, a pooled connector is reused across requests and its init is skipped (`CTGDIS1914I Not initializing a re-used Connector`), but the **Before-Initialize hook still fires each request** and `.connector.setParam` re-writes the filter on the live instance — so pooling keeps the per-request substitution (verified: `get_user_groups` for alice/bob/erin returns distinct groups under pooling). The **old** `getConfiguration().setParameter` is the trap here: it no-ops, so the first request's filter sticks and every later call returns the **first** caller's data — the reason reuse had to be disabled before the setter was fixed. Pool freely **once you're on `.connector.setParam`**; never with the `getConfiguration` form.
+
+**Symptom if broken:** AL log shows `search filter '(...member=uid=$userId,...)'` verbatim, or the hook-set filter never appears at all (no `CTGDJQ017I` line); `Loop Cycles:0`; or (under pooling with the wrong setter) a second call returns the first call's results.
 
 ## 13. "List" tools: nothing auto-collects — accumulate per cycle, and scope the Input map
 
