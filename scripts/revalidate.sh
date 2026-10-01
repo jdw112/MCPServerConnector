@@ -41,7 +41,7 @@ TOKEN="${TOKEN:-}"
 ORIGIN="${ORIGIN:-https://good.example}"
 PROTO="${PROTO:-2025-06-18}"
 USERID="${USERID:-alice}"          # a seeded uid the UC1 happy-path cases look up
-LOGFILE="${LOGFILE:-/Users/jason/Applications/SOLDIR/logs/ibmdi.log}"
+LOGFILE="${LOGFILE:-./logs/ibmdi.log}"   # set to your solution dir's logs/ibmdi.log
 
 SHOW_LOG=0
 LOG_LINES=40

@@ -4,7 +4,7 @@
 
 **Target client:** Claude (Desktop / Code / Cowork) connecting to the AL's MCP endpoint.
 
-**Reference install used for verification:** `/Users/jason/Applications/ISVDI` (VDI 10, Java 17 / OpenJ9 bundled JRE).
+**Reference install used for verification:** `/path/to/ISVDI` (VDI 10, Java 17 / OpenJ9 bundled JRE).
 
 ---
 
