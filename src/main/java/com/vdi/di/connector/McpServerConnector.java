@@ -434,7 +434,16 @@ public class McpServerConnector extends HTTPServerConnector {
         if (httpEntry == null) {
             return null;
         }
+        return processRequest(httpEntry);
+    }
 
+    /**
+     * Applies the transport gates and JSON-RPC dispatch to an already-read HTTP
+     * request Entry. Returns the work Entry for tools/call, or null when the
+     * request was answered directly. Split out of getNextEntry() so it can be
+     * unit-tested without a socket.
+     */
+    Entry processRequest(Entry httpEntry) throws Exception {
         // Health probe (GET on the configured healthPath) is answered before any
         // other check — liveness probes are unauthenticated and narrow (specific
         // path + GET only).
@@ -721,7 +730,7 @@ public class McpServerConnector extends HTTPServerConnector {
         reply.setAttribute(ATTR_NAME_HTTP_CONTENT_TYPE, CONTENT_TYPE_JSON);
         reply.setAttribute("http.status", HTTP_ACCEPTED);
         reply.setAttribute("http.Connection", "close");   // one-request-per-connection; see buildHttpReplyEntry
-        super.replyEntry(reply);
+        sendJson(reply);
     }
 
     private void sendError(Entry httpEntry, Object id, int code, String message) throws Exception {
@@ -753,7 +762,8 @@ public class McpServerConnector extends HTTPServerConnector {
         return reply;
     }
 
-    private void sendJson(Entry reply) throws Exception {
+    /** Writes the HTTP reply. Package-private so tests can capture replies instead of writing to a socket. */
+    void sendJson(Entry reply) throws Exception {
         super.replyEntry(reply);
     }
 }

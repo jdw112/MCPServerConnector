@@ -33,6 +33,14 @@ mvn -Dvdi.home=/path/to/ISVDI package
 
 A prebuilt jar is checked in at [`dist/mcp-server-connector.jar`](dist/mcp-server-connector.jar) for convenience — grab it directly if you don't want to build. It depends only on jars already present in a VDI 10 install (nothing is repackaged), so it runs as-is. Rebuild from source (above) if you want to verify or modify it.
 
+## Unit tests
+
+```
+mvn -Dvdi.home=/path/to/ISVDI test
+```
+
+JUnit 5 tests cover the JSON-RPC/MCP layer and transport gates (initialize/version negotiation, tools/list, tools/call work-Entry mapping, reserved `$mcp.*` argument protection, actor header, reply mapping and no-leak behavior, bearer/Origin/path/method/size/protocol-version checks, health probe). They run without a socket or running VDI; the platform jars are needed on the test classpath only (see `pom.xml`).
+
 ## Deploy
 
 Copy the jar (`dist/mcp-server-connector.jar`, or `target/mcp-server-connector.jar` if you built it) to `VDI_install_dir/jars/connectors/`, restart the Config Editor / server, and the `MCPServerConnector` connector appears under Connectors. See [docs/CONFIGURE.md](docs/CONFIGURE.md) to build the AssemblyLine and connect a client.
